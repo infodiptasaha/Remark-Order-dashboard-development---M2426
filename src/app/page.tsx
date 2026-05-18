@@ -26,9 +26,7 @@ interface Order {
   SOName: string; OutletName: string; BrandName: string; SKUName: string
   OrderPcs: number; FreePcs: number; GrossTP: number; Discount: number; NetTP: number
 }
-interface Filters {
-  regions: string[]; areas: string[]; territories: string[]; soNames: string[]
-}
+interface Filters { regions: string[]; areas: string[]; territories: string[]; soNames: string[] }
 
 function BarChart({ data, title }: { data: ChartItem[]; title: string }) {
   const max = data.length > 0 ? Math.max(...data.map(d => d.value)) : 1
@@ -57,7 +55,6 @@ function BarChart({ data, title }: { data: ChartItem[]; title: string }) {
 }
 
 export default function Page() {
-  // Filter state
   const [region,    setRegion]    = useState('')
   const [area,      setArea]      = useState('')
   const [territory, setTerritory] = useState('')
@@ -67,19 +64,17 @@ export default function Page() {
   const [dateTo,    setDateTo]    = useState('')
   const [page,      setPage]      = useState(0)
 
-  // Data state
   const [filters,  setFilters]  = useState<Filters>({ regions:[], areas:[], territories:[], soNames:[] })
   const [metrics,  setMetrics]  = useState<Metrics | null>(null)
-  const [charts,   setCharts]   = useState<Charts | null>(null)
+  const [charts,   setCharts]   = useState<Charts>({ byRegion:[], byTerritory:[], bySO:[], byArea:[] })
   const [orders,   setOrders]   = useState<Order[]>([])
   const [total,    setTotal]    = useState(0)
   const [loading,  setLoading]  = useState(true)
   const [error,    setError]    = useState('')
 
-  const pageSize  = 20
-  const abortRef  = useRef<AbortController | null>(null)
+  const pageSize = 20
+  const abortRef = useRef<AbortController | null>(null)
 
-  // Build query string from current filters
   const buildQS = useCallback((extra?: Record<string, string>) => {
     const p = new URLSearchParams()
     if (region)    p.set('region',    region)
@@ -89,11 +84,10 @@ export default function Page() {
     if (search)    p.set('search',    search)
     if (dateFrom)  p.set('dateFrom',  dateFrom)
     if (dateTo)    p.set('dateTo',    dateTo)
-    if (extra) Object.entries(extra).forEach(([k,v]) => p.set(k,v))
+    if (extra) Object.entries(extra).forEach(([k, v]) => p.set(k, v))
     return p.toString()
   }, [region, area, territory, soName, search, dateFrom, dateTo])
 
-  // Fetch cascading filter options whenever parent filters change
   useEffect(() => {
     fetch('/api/orders?mode=filters&' + buildQS())
       .then(r => r.json())
@@ -101,12 +95,10 @@ export default function Page() {
       .catch(() => {})
   }, [region, area, territory, buildQS])
 
-  // Main data fetch with abort + debounce
   useEffect(() => {
     if (abortRef.current) abortRef.current.abort()
     const ctrl = new AbortController()
     abortRef.current = ctrl
-
     setLoading(true)
     setError('')
 
@@ -114,15 +106,20 @@ export default function Page() {
     const tableQS = buildQS({ page: String(page), pageSize: String(pageSize) })
 
     Promise.all([
-      fetch('/api/orders?mode=summary&' + base,          { signal: ctrl.signal }).then(r => r.json()),
-      fetch('/api/orders?mode=charts&'  + base,          { signal: ctrl.signal }).then(r => r.json()),
-      fetch('/api/orders?mode=table&'   + tableQS,       { signal: ctrl.signal }).then(r => r.json()),
+      fetch('/api/orders?mode=summary&' + base,    { signal: ctrl.signal }).then(r => r.json()),
+      fetch('/api/orders?mode=charts&'  + base,    { signal: ctrl.signal }).then(r => r.json()),
+      fetch('/api/orders?mode=table&'   + tableQS, { signal: ctrl.signal }).then(r => r.json()),
     ])
       .then(([s, c, t]) => {
-        setMetrics(s)
-        setCharts(c)
-        setOrders(t.data || [])
-        setTotal(t.total || 0)
+        setMetrics(s || null)
+        setCharts({
+          byRegion:    Array.isArray(c?.byRegion)    ? c.byRegion    : [],
+          byTerritory: Array.isArray(c?.byTerritory) ? c.byTerritory : [],
+          bySO:        Array.isArray(c?.bySO)        ? c.bySO        : [],
+          byArea:      Array.isArray(c?.byArea)      ? c.byArea      : [],
+        })
+        setOrders(Array.isArray(t?.data) ? t.data : [])
+        setTotal(t?.total || 0)
         setLoading(false)
       })
       .catch(e => {
@@ -133,77 +130,55 @@ export default function Page() {
       })
   }, [buildQS, page])
 
-  // Reset downstream filters when parent changes
-  const handleRegion = (v: string)    => { setRegion(v);    setArea(''); setTerritory(''); setSoName(''); setPage(0) }
-  const handleArea = (v: string)      => { setArea(v);      setTerritory(''); setSoName(''); setPage(0) }
+  const handleRegion    = (v: string) => { setRegion(v);    setArea(''); setTerritory(''); setSoName(''); setPage(0) }
+  const handleArea      = (v: string) => { setArea(v);      setTerritory(''); setSoName(''); setPage(0) }
   const handleTerritory = (v: string) => { setTerritory(v); setSoName(''); setPage(0) }
-  const handleSO = (v: string)        => { setSoName(v);    setPage(0) }
-
-  const clearAll = () => {
-    setRegion(''); setArea(''); setTerritory(''); setSoName('')
-    setSearch(''); setDateFrom(''); setDateTo(''); setPage(0)
-  }
+  const handleSO        = (v: string) => { setSoName(v);    setPage(0) }
+  const clearAll        = () => { setRegion(''); setArea(''); setTerritory(''); setSoName(''); setSearch(''); setDateFrom(''); setDateTo(''); setPage(0) }
 
   const hasFilters = region || area || territory || soName || search || dateFrom || dateTo
   const totalPages = Math.ceil(total / pageSize)
 
-  const selCls  = 'text-sm px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-700 cursor-pointer focus:outline-none hover:border-blue-400 transition-colors'
-  const btnCls  = 'px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed'
-  const dateCls = 'text-sm px-2 py-1 rounded-lg border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400/30 cursor-pointer'
+  const selCls = 'text-sm px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-700 cursor-pointer focus:outline-none hover:border-blue-400 transition-colors'
+  const btnCls = 'px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed'
+  const dateCls = 'text-sm px-2 py-1 rounded-lg border border-gray-200 bg-white text-gray-700 focus:outline-none cursor-pointer'
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* ── Header ── */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
         <div className="max-w-screen-xl mx-auto px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
-          {/* Logo */}
           <div className="flex items-center gap-3 shrink-0">
             <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-xs">R</div>
             <div>
               <h1 className="text-sm font-semibold text-gray-900">RHBL Order Dashboard</h1>
-              <p className="text-xs text-gray-400">Live data from MongoDB</p>
+              <p className="text-xs text-gray-400">Based On N-1 Data</p>
             </div>
           </div>
-
-          {/* Filters */}
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Date range */}
             <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1">
               <span className="text-xs text-gray-400">From</span>
-              <input type="date" className={dateCls} value={dateFrom}
-                onChange={e => { setDateFrom(e.target.value); setPage(0) }} />
+              <input type="date" className={dateCls} value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPage(0) }} />
               <span className="text-xs text-gray-400">To</span>
-              <input type="date" className={dateCls} value={dateTo}
-                onChange={e => { setDateTo(e.target.value); setPage(0) }} />
+              <input type="date" className={dateCls} value={dateTo} onChange={e => { setDateTo(e.target.value); setPage(0) }} />
             </div>
-
-            {/* Region */}
             <select className={selCls} value={region} onChange={e => handleRegion(e.target.value)}>
               <option value="">All Regions</option>
               {filters.regions.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
-
-            {/* Area — filtered by region */}
             <select className={selCls} value={area} onChange={e => handleArea(e.target.value)}>
               <option value="">All Areas</option>
               {filters.areas.map(a => <option key={a} value={a}>{a}</option>)}
             </select>
-
-            {/* Territory — filtered by region+area */}
             <select className={selCls} value={territory} onChange={e => handleTerritory(e.target.value)}>
               <option value="">All Territories</option>
               {filters.territories.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
-
-            {/* SO — filtered by region+area+territory */}
             <select className={selCls} value={soName} onChange={e => handleSO(e.target.value)}>
               <option value="">All SOs</option>
               {filters.soNames.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
-
             {hasFilters && (
-              <button onClick={clearAll}
-                className="px-3 py-1.5 rounded-lg border border-red-200 bg-white text-sm text-red-500 hover:bg-red-50 cursor-pointer transition-colors">
+              <button onClick={clearAll} className="px-3 py-1.5 rounded-lg border border-red-200 bg-white text-sm text-red-500 hover:bg-red-50 cursor-pointer">
                 ✕ Clear
               </button>
             )}
@@ -212,22 +187,18 @@ export default function Page() {
       </header>
 
       <main className="max-w-screen-xl mx-auto px-4 py-6 space-y-5">
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 text-sm">⚠️ {error}</div>
-        )}
+        {error && <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 text-sm">⚠️ {error}</div>}
 
-        {/* ── Metric cards ── */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {[
-            { label:'Order lines', value: metrics != null ? String(metrics.totalLines ?? 0)               : '—', sub:'',                                                               color:'#3266ad' },
-            { label:'Total pcs',   value: metrics != null ? String(metrics.totalPcs   ?? 0)               : '—', sub:'Free: '+String(metrics != null ? (metrics.totalFreePcs??0) : 0), color:'#1d9e75' },
-            { label:'Gross TP',    value: metrics != null ? fmtShort(metrics.totalGross    ?? 0)           : '—', sub:'',                                                               color:'#1d9e75' },
-            { label:'Discount',    value: metrics != null ? fmtShort(metrics.totalDiscount ?? 0)           : '—', sub:'',                                                               color:'#d85a30' },
-            { label:'Net TP',      value: metrics != null ? fmtShort(metrics.totalNet      ?? 0)           : '—', sub:'',                                                               color:'#534ab7' },
-            { label:'Outlets',     value: metrics != null ? String(metrics.uniqueOutlets   ?? 0)           : '—', sub:String(metrics != null ? (metrics.uniqueSOs??0):0)+' SOs',       color:'#993556' },
+            { label:'Order lines', value: metrics != null ? String(metrics.totalLines ?? 0)          : '—', sub:'',                                                                color:'#3266ad' },
+            { label:'Total pcs',   value: metrics != null ? String(metrics.totalPcs   ?? 0)          : '—', sub:'Free: '+String(metrics != null ? (metrics.totalFreePcs??0) : 0), color:'#1d9e75' },
+            { label:'Gross TP',    value: metrics != null ? fmtShort(metrics.totalGross    ?? 0)     : '—', sub:'',                                                                color:'#1d9e75' },
+            { label:'Discount',    value: metrics != null ? fmtShort(metrics.totalDiscount ?? 0)     : '—', sub:'',                                                                color:'#d85a30' },
+            { label:'Net TP',      value: metrics != null ? fmtShort(metrics.totalNet      ?? 0)     : '—', sub:'',                                                                color:'#534ab7' },
+            { label:'Outlets',     value: metrics != null ? String(metrics.uniqueOutlets   ?? 0)     : '—', sub:String(metrics != null ? (metrics.uniqueSOs??0) : 0)+' SOs',      color:'#993556' },
           ].map((m, i) => (
-            <div key={i} style={{ borderLeft: '4px solid ' + m.color }}
-              className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+            <div key={i} style={{ borderLeft: '4px solid ' + m.color }} className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
               <p className="text-xs text-gray-500 mb-1">{m.label}</p>
               <p className="text-xl font-semibold text-gray-900">{m.value}</p>
               {m.sub && <p className="text-xs text-gray-400 mt-1">{m.sub}</p>}
@@ -235,21 +206,18 @@ export default function Page() {
           ))}
         </div>
 
-        {/* ── Charts ── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {loading && !charts
+          {loading
             ? [1,2,3,4].map(i => <div key={i} className="bg-gray-100 rounded-xl h-48 animate-pulse" />)
-            : charts
-              ? <>
-                  <BarChart data={charts.byRegion}    title="Net TP by Region" />
-                  <BarChart data={charts.byTerritory} title="Net TP by Territory" />
-                  <BarChart data={charts.bySO}        title="Top SOs by Net TP" />
-                  <BarChart data={charts.byArea}      title="Net TP by Area" />
-                </>
-              : null}
+            : <>
+                <BarChart data={charts.byRegion}    title="Net TP by Region" />
+                <BarChart data={charts.byTerritory} title="Net TP by Territory" />
+                <BarChart data={charts.bySO}        title="Top SOs by Net TP" />
+                <BarChart data={charts.byArea}      title="Net TP by Area" />
+              </>
+          }
         </div>
 
-        {/* ── Table ── */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-gray-100 flex items-center gap-3 flex-wrap">
             <h2 className="text-sm font-medium text-gray-800 flex-1">
@@ -298,14 +266,13 @@ export default function Page() {
             </div>
           )}
 
-          {/* Pagination */}
           <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-400">
             <span>{(total || 0).toLocaleString()} rows{total > 0 ? ' · page ' + (page+1) + ' of ' + totalPages : ''}</span>
             <div className="flex gap-1">
-              <button className={btnCls} disabled={page === 0}               onClick={() => setPage(0)}>««</button>
-              <button className={btnCls} disabled={page === 0}               onClick={() => setPage(p => p-1)}>‹</button>
-              <button className={btnCls} disabled={page >= totalPages-1}     onClick={() => setPage(p => p+1)}>›</button>
-              <button className={btnCls} disabled={page >= totalPages-1}     onClick={() => setPage(totalPages-1)}>»»</button>
+              <button className={btnCls} disabled={page === 0}           onClick={() => setPage(0)}>««</button>
+              <button className={btnCls} disabled={page === 0}           onClick={() => setPage(p => p-1)}>‹</button>
+              <button className={btnCls} disabled={page >= totalPages-1} onClick={() => setPage(p => p+1)}>›</button>
+              <button className={btnCls} disabled={page >= totalPages-1} onClick={() => setPage(totalPages-1)}>»»</button>
             </div>
           </div>
         </div>
