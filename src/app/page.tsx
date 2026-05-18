@@ -7,7 +7,6 @@ const COLORS = ['#3266ad','#1d9e75','#d85a30','#ba7517','#993556','#534ab7','#0f
 function fmt(n: number): string {
   return '৳' + n.toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
-
 function fmtShort(n: number): string {
   if (n >= 1000000) return '৳' + (n / 1000000).toFixed(2) + 'M'
   if (n >= 1000) return '৳' + (n / 1000).toFixed(1) + 'K'
@@ -15,50 +14,18 @@ function fmtShort(n: number): string {
 }
 
 interface Metrics {
-  totalLines: number
-  totalPcs: number
-  totalFreePcs: number
-  totalGross: number
-  totalDiscount: number
-  totalNet: number
-  uniqueOutlets: number
-  uniqueSOs: number
+  totalLines: number; totalPcs: number; totalFreePcs: number
+  totalGross: number; totalDiscount: number; totalNet: number
+  uniqueOutlets: number; uniqueSOs: number
 }
-
-interface ChartItem {
-  name: string
-  value: number
-}
-
-interface Charts {
-  byRegion: ChartItem[]
-  byBrand: ChartItem[]
-  bySO: ChartItem[]
-  byArea: ChartItem[]
-}
-
+interface ChartItem { name: string; value: number }
+interface Charts { byRegion: ChartItem[]; byBrand: ChartItem[]; bySO: ChartItem[]; byArea: ChartItem[] }
 interface Order {
-  OrderDate: string
-  Region: string
-  Area: string
-  Town: string
-  SOName: string
-  OutletName: string
-  BrandName: string
-  SKUName: string
-  OrderPcs: number
-  FreePcs: number
-  GrossTP: number
-  Discount: number
-  NetTP: number
+  OrderDate: string; Region: string; Area: string; Town: string; SOName: string
+  OutletName: string; BrandName: string; SKUName: string
+  OrderPcs: number; FreePcs: number; GrossTP: number; Discount: number; NetTP: number
 }
-
-interface Filters {
-  regions: string[]
-  brands: string[]
-  soNames: string[]
-  areas: string[]
-}
+interface Filters { regions: string[]; brands: string[]; soNames: string[]; areas: string[] }
 
 function BarChart({ data, title }: { data: ChartItem[]; title: string }) {
   const max = data.length > 0 ? Math.max(...data.map(d => d.value)) : 1
@@ -73,10 +40,8 @@ function BarChart({ data, title }: { data: ChartItem[]; title: string }) {
             <div key={i} className="flex items-center gap-2 text-xs">
               <span className="w-24 shrink-0 truncate text-gray-500" title={d.name}>{d.name}</span>
               <div className="flex-1 bg-gray-100 rounded h-5 overflow-hidden">
-                <div
-                  className="h-full rounded flex items-center px-1.5 text-white text-[10px] font-medium"
-                  style={{ width: Math.max((d.value / max) * 100, 8) + '%', background: COLORS[i % COLORS.length] }}
-                >
+                <div className="h-full rounded flex items-center px-1.5 text-white text-[10px] font-medium"
+                  style={{ width: Math.max((d.value / max) * 100, 8) + '%', background: COLORS[i % COLORS.length] }}>
                   {d.value / max > 0.3 ? fmtShort(d.value) : ''}
                 </div>
               </div>
@@ -95,6 +60,8 @@ export default function Page() {
   const [soName, setSoName] = useState('')
   const [area, setArea] = useState('')
   const [search, setSearch] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [page, setPage] = useState(0)
 
   const [filters, setFilters] = useState<Filters | null>(null)
@@ -114,14 +81,14 @@ export default function Page() {
     if (soName) p.set('soName', soName)
     if (area) p.set('area', area)
     if (search) p.set('search', search)
+    if (dateFrom) p.set('dateFrom', dateFrom)
+    if (dateTo) p.set('dateTo', dateTo)
     return p.toString()
-  }, [region, brand, soName, area, search])
+  }, [region, brand, soName, area, search, dateFrom, dateTo])
 
   useEffect(() => {
     fetch('/api/orders?mode=filters')
-      .then(r => r.json())
-      .then(d => setFilters(d))
-      .catch(() => {})
+      .then(r => r.json()).then(d => setFilters(d)).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -136,19 +103,24 @@ export default function Page() {
       fetch('/api/orders?mode=table&' + tableQS).then(r => r.json()),
     ])
       .then(([s, c, t]) => {
-        setMetrics(s)
-        setCharts(c)
-        setOrders(t.data || [])
-        setTotal(t.total || 0)
+        setMetrics(s); setCharts(c)
+        setOrders(t.data || []); setTotal(t.total || 0)
       })
       .catch(() => setError('Failed to load data. Check MongoDB connection.'))
       .finally(() => setLoading(false))
   }, [buildQS, page])
 
+  const clearAll = () => {
+    setRegion(''); setBrand(''); setSoName(''); setArea('')
+    setSearch(''); setDateFrom(''); setDateTo(''); setPage(0)
+  }
+
+  const hasFilters = region || brand || soName || area || search || dateFrom || dateTo
   const totalPages = Math.ceil(total / pageSize)
 
   const selCls = 'text-sm px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-700 cursor-pointer focus:outline-none'
   const btnCls = 'px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed'
+  const dateCls = 'text-sm px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer'
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -163,6 +135,17 @@ export default function Page() {
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Date filters */}
+            <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1">
+              <span className="text-xs text-gray-400 shrink-0">From</span>
+              <input type="date" className={dateCls} value={dateFrom}
+                onChange={e => { setDateFrom(e.target.value); setPage(0) }} />
+              <span className="text-xs text-gray-400 shrink-0">To</span>
+              <input type="date" className={dateCls} value={dateTo}
+                onChange={e => { setDateTo(e.target.value); setPage(0) }} />
+            </div>
+
+            {/* Dropdowns */}
             <select className={selCls} value={region} onChange={e => { setRegion(e.target.value); setPage(0) }}>
               <option value="">All Regions</option>
               {filters && filters.regions.map(r => <option key={r} value={r}>{r}</option>)}
@@ -179,11 +162,9 @@ export default function Page() {
               <option value="">All SOs</option>
               {filters && filters.soNames.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
-            {(region || brand || soName || area || search) && (
+            {hasFilters && (
               <button className="px-3 py-1.5 rounded-lg border border-red-200 bg-white text-sm text-red-500 hover:bg-red-50 cursor-pointer"
-                onClick={() => { setRegion(''); setBrand(''); setSoName(''); setArea(''); setSearch(''); setPage(0) }}>
-                ✕ Clear
-              </button>
+                onClick={clearAll}>✕ Clear</button>
             )}
           </div>
         </div>
@@ -197,12 +178,12 @@ export default function Page() {
         {/* Metric cards */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {[
-            { label: 'Order lines', value: metrics ? metrics.totalLines : '—', sub: '', color: '#3266ad' },
-            { label: 'Total pcs', value: metrics ? metrics.totalPcs.toLocaleString() : '—', sub: 'Free: ' + (metrics ? metrics.totalFreePcs : 0), color: '#1d9e75' },
-            { label: 'Gross TP', value: metrics ? fmtShort(metrics.totalGross) : '—', sub: '', color: '#1d9e75' },
-            { label: 'Discount', value: metrics ? fmtShort(metrics.totalDiscount) : '—', sub: '', color: '#d85a30' },
-            { label: 'Net TP', value: metrics ? fmtShort(metrics.totalNet) : '—', sub: '', color: '#534ab7' },
-            { label: 'Outlets', value: metrics ? metrics.uniqueOutlets : '—', sub: (metrics ? metrics.uniqueSOs : 0) + ' SOs', color: '#993556' },
+            { label: 'Order lines', value: metrics != null ? String(metrics.totalLines ?? 0) : '—', sub: '', color: '#3266ad' },
+            { label: 'Total pcs', value: metrics != null ? String(metrics.totalPcs ?? 0) : '—', sub: 'Free: ' + String(metrics != null ? (metrics.totalFreePcs ?? 0) : 0), color: '#1d9e75' },
+            { label: 'Gross TP', value: metrics != null ? fmtShort(metrics.totalGross ?? 0) : '—', sub: '', color: '#1d9e75' },
+            { label: 'Discount', value: metrics != null ? fmtShort(metrics.totalDiscount ?? 0) : '—', sub: '', color: '#d85a30' },
+            { label: 'Net TP', value: metrics != null ? fmtShort(metrics.totalNet ?? 0) : '—', sub: '', color: '#534ab7' },
+            { label: 'Outlets', value: metrics != null ? String(metrics.uniqueOutlets ?? 0) : '—', sub: String(metrics != null ? (metrics.uniqueSOs ?? 0) : 0) + ' SOs', color: '#993556' },
           ].map((m, i) => (
             <div key={i} style={{ borderLeft: '4px solid ' + m.color }} className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
               <p className="text-xs text-gray-500 mb-1">{m.label}</p>
@@ -223,21 +204,16 @@ export default function Page() {
                   <BarChart data={charts.bySO} title="Top SOs by Net TP" />
                   <BarChart data={charts.byArea} title="Net TP by Area" />
                 </>
-              : null
-          }
+              : null}
         </div>
 
         {/* Table */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-gray-100 flex items-center gap-3 flex-wrap">
             <h2 className="text-sm font-medium text-gray-800 flex-1">Order lines</h2>
-            <input
-              type="text"
-              placeholder="Search outlet, SKU, SO, town…"
-              value={search}
-              onChange={e => { setSearch(e.target.value); setPage(0) }}
-              className="text-sm px-3 py-2 rounded-lg border border-gray-200 w-64 focus:outline-none"
-            />
+            <input type="text" placeholder="Search outlet, SKU, SO, town…"
+              value={search} onChange={e => { setSearch(e.target.value); setPage(0) }}
+              className="text-sm px-3 py-2 rounded-lg border border-gray-200 w-64 focus:outline-none" />
           </div>
 
           {loading ? (
@@ -269,9 +245,9 @@ export default function Page() {
                       <td className="px-3 py-2 max-w-[150px] truncate text-gray-500" title={row.SKUName}>{row.SKUName}</td>
                       <td className="px-3 py-2 text-right font-medium">{row.OrderPcs}</td>
                       <td className="px-3 py-2 text-right text-emerald-600">{row.FreePcs > 0 ? row.FreePcs : '—'}</td>
-                      <td className="px-3 py-2 text-right text-gray-400">{fmt(row.GrossTP)}</td>
+                      <td className="px-3 py-2 text-right text-gray-400">{fmt(row.GrossTP ?? 0)}</td>
                       <td className="px-3 py-2 text-right text-orange-500">{row.Discount > 0 ? row.Discount : '—'}</td>
-                      <td className="px-3 py-2 text-right font-semibold">{fmt(row.NetTP)}</td>
+                      <td className="px-3 py-2 text-right font-semibold">{fmt(row.NetTP ?? 0)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -280,7 +256,7 @@ export default function Page() {
           )}
 
           <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-400">
-            <span>{total.toLocaleString()} rows{total > 0 ? ' · page ' + (page + 1) + ' of ' + totalPages : ''}</span>
+            <span>{(total || 0).toLocaleString()} rows{total > 0 ? ' · page ' + (page + 1) + ' of ' + totalPages : ''}</span>
             <div className="flex gap-1">
               <button className={btnCls} disabled={page === 0} onClick={() => setPage(0)}>««</button>
               <button className={btnCls} disabled={page === 0} onClick={() => setPage(p => p - 1)}>‹</button>
