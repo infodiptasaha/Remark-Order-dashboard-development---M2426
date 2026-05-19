@@ -11,6 +11,7 @@ export async function GET(req: NextRequest) {
     const territory = searchParams.get('territory') || ''
     const town      = searchParams.get('town')      || ''
     const soName    = searchParams.get('soName')    || ''
+    const brand     = searchParams.get('brand')     || ''
     const search    = searchParams.get('search')    || ''
     const dateFrom  = searchParams.get('dateFrom')  || ''
     const dateTo    = searchParams.get('dateTo')    || ''
@@ -21,11 +22,20 @@ export async function GET(req: NextRequest) {
     const db  = await connectDB()
     const col = db.collection('ORDER_DATA')
 
+    // Default date range = current month if no date provided
+    const now = new Date()
+    const defaultFrom = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-01'
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+    const defaultTo = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(lastDay).padStart(2, '0')
+
+    const effectiveFrom = dateFrom || defaultFrom
+    const effectiveTo   = dateTo   || defaultTo
+
     const sample = await col.findOne({})
     if (!sample) {
-      if (mode === 'filters')  return NextResponse.json({ regions:[],areas:[],territories:[],towns:[],soNames:[] })
+      if (mode === 'filters')  return NextResponse.json({ regions:[],areas:[],territories:[],towns:[],soNames:[],brands:[] })
       if (mode === 'summary')  return NextResponse.json({ totalLines:0,totalPcs:0,totalFreePcs:0,totalGross:0,totalDiscount:0,totalNet:0,uniqueOutlets:0,uniqueSOs:0 })
-      if (mode === 'charts')   return NextResponse.json({ byRegion:[],byTerritory:[],bySO:[],byArea:[] })
+      if (mode === 'charts')   return NextResponse.json({ byRegion:[],byArea:[],byTerritory:[],byTown:[],bySO:[] })
       return NextResponse.json({ data:[],total:0,page:0,pageSize })
     }
 
@@ -38,6 +48,7 @@ export async function GET(req: NextRequest) {
       territory:  f(['Territory']),
       town:       f(['Town']),
       soName:     f(['SO Name','SOName']),
+      brand:      f(['Brand Name','BrandName']),
       outlet:     f(['Outlet Name','OutletName']),
       outletCode: f(['Outlet Code','OutletCode']),
       soCode:     f(['SO Code','SOCode']),
@@ -48,15 +59,16 @@ export async function GET(req: NextRequest) {
       grossTP:    f(['Order Gross Value(TP)','GrossTP']),
       discount:   f(['Discount']),
       netTP:      f(['Net Order Value(TP)','NetTP']),
-      brand:      f(['Brand Name','BrandName']),
     }
 
+    // Base query (non-date)
     const query: Record<string, unknown> = {}
     if (region)    query[F.region]    = region
     if (area)      query[F.area]      = area
     if (territory) query[F.territory] = territory
     if (town)      query[F.town]      = town
     if (soName)    query[F.soName]    = soName
+    if (brand)     query[F.brand]     = brand
     if (search) {
       query['$or'] = [
         { [F.outlet]:  { $regex: search, $options: 'i' } },
@@ -66,68 +78,65 @@ export async function GET(req: NextRequest) {
       ]
     }
 
-    const buildDateStages = () => {
-      if (!dateFrom && !dateTo) return []
-      return [
-        {
-          $addFields: {
-            _d: {
-              $cond: {
-                if: { $regexMatch: { input: { $ifNull: [`$${F.orderDate}`, ''] }, regex: '^\\d{4}-\\d{2}-\\d{2}$' } },
-                then: { $ifNull: [`$${F.orderDate}`, ''] },
-                else: {
-                  $let: {
-                    vars: { raw: { $ifNull: [`$${F.orderDate}`, ''] } },
-                    in: {
-                      $concat: [
-                        { $cond: [{ $lte: [{ $toInt: { $substr: ['$$raw', 7, 2] } }, 50] }, '20', '19'] },
-                        { $substr: ['$$raw', 7, 2] }, '-',
-                        { $switch: {
-                          branches: [
-                            { case: { $regexMatch: { input: '$$raw', regex: 'Jan' } }, then: '01' },
-                            { case: { $regexMatch: { input: '$$raw', regex: 'Feb' } }, then: '02' },
-                            { case: { $regexMatch: { input: '$$raw', regex: 'Mar' } }, then: '03' },
-                            { case: { $regexMatch: { input: '$$raw', regex: 'Apr' } }, then: '04' },
-                            { case: { $regexMatch: { input: '$$raw', regex: 'May' } }, then: '05' },
-                            { case: { $regexMatch: { input: '$$raw', regex: 'Jun' } }, then: '06' },
-                            { case: { $regexMatch: { input: '$$raw', regex: 'Jul' } }, then: '07' },
-                            { case: { $regexMatch: { input: '$$raw', regex: 'Aug' } }, then: '08' },
-                            { case: { $regexMatch: { input: '$$raw', regex: 'Sep' } }, then: '09' },
-                            { case: { $regexMatch: { input: '$$raw', regex: 'Oct' } }, then: '10' },
-                            { case: { $regexMatch: { input: '$$raw', regex: 'Nov' } }, then: '11' },
-                            { case: { $regexMatch: { input: '$$raw', regex: 'Dec' } }, then: '12' },
-                          ],
-                          default: '00'
-                        }}, '-',
-                        { $cond: [
-                          { $lte: [{ $strLenCP: { $substr: ['$$raw', 0, 2] } }, 1] },
-                          { $concat: ['0', { $substr: ['$$raw', 0, 1] }] },
-                          { $substr: ['$$raw', 0, 2] }
-                        ]}
-                      ]
-                    }
+    // Date pipeline — always active (default = current month)
+    const dateStages = [
+      {
+        $addFields: {
+          _d: {
+            $cond: {
+              if: { $regexMatch: { input: { $ifNull: [`$${F.orderDate}`, ''] }, regex: '^\\d{4}-\\d{2}-\\d{2}$' } },
+              then: { $ifNull: [`$${F.orderDate}`, ''] },
+              else: {
+                $let: {
+                  vars: { raw: { $ifNull: [`$${F.orderDate}`, ''] } },
+                  in: {
+                    $concat: [
+                      { $cond: [{ $lte: [{ $toInt: { $substr: ['$$raw', 7, 2] } }, 50] }, '20', '19'] },
+                      { $substr: ['$$raw', 7, 2] }, '-',
+                      { $switch: {
+                        branches: [
+                          { case: { $regexMatch: { input: '$$raw', regex: 'Jan' } }, then: '01' },
+                          { case: { $regexMatch: { input: '$$raw', regex: 'Feb' } }, then: '02' },
+                          { case: { $regexMatch: { input: '$$raw', regex: 'Mar' } }, then: '03' },
+                          { case: { $regexMatch: { input: '$$raw', regex: 'Apr' } }, then: '04' },
+                          { case: { $regexMatch: { input: '$$raw', regex: 'May' } }, then: '05' },
+                          { case: { $regexMatch: { input: '$$raw', regex: 'Jun' } }, then: '06' },
+                          { case: { $regexMatch: { input: '$$raw', regex: 'Jul' } }, then: '07' },
+                          { case: { $regexMatch: { input: '$$raw', regex: 'Aug' } }, then: '08' },
+                          { case: { $regexMatch: { input: '$$raw', regex: 'Sep' } }, then: '09' },
+                          { case: { $regexMatch: { input: '$$raw', regex: 'Oct' } }, then: '10' },
+                          { case: { $regexMatch: { input: '$$raw', regex: 'Nov' } }, then: '11' },
+                          { case: { $regexMatch: { input: '$$raw', regex: 'Dec' } }, then: '12' },
+                        ],
+                        default: '00'
+                      }}, '-',
+                      { $cond: [
+                        { $lte: [{ $strLenCP: { $substr: ['$$raw', 0, 2] } }, 1] },
+                        { $concat: ['0', { $substr: ['$$raw', 0, 1] }] },
+                        { $substr: ['$$raw', 0, 2] }
+                      ]}
+                    ]
                   }
                 }
               }
             }
           }
-        },
-        {
-          $match: {
-            ...(dateFrom ? { _d: { $gte: dateFrom } } : {}),
-            ...(dateTo   ? { _d: { $lte: dateTo   } } : {}),
-          }
         }
-      ]
-    }
+      },
+      { $match: { _d: { $gte: effectiveFrom, $lte: effectiveTo } } }
+    ]
+
+    // Gross TP value field
+    const grossVal = { $toDouble: `$${F.grossTP}` }
 
     if (mode === 'filters') {
-      const [regions, areas, territories, towns, soNames] = await Promise.all([
+      const [regions, areas, territories, towns, soNames, brands] = await Promise.all([
         col.distinct(F.region,    {}),
         col.distinct(F.area,      query),
         col.distinct(F.territory, query),
         col.distinct(F.town,      query),
         col.distinct(F.soName,    query),
+        col.distinct(F.brand,     query),
       ])
       return NextResponse.json({
         regions:     regions.filter(Boolean).sort(),
@@ -135,18 +144,13 @@ export async function GET(req: NextRequest) {
         territories: territories.filter(Boolean).sort(),
         towns:       towns.filter(Boolean).sort(),
         soNames:     soNames.filter(Boolean).sort(),
+        brands:      brands.filter(Boolean).sort(),
       })
     }
 
-    const dateStages = buildDateStages()
-
-    // ── VALUE field = Gross TP everywhere ──────────────────
-    const grossVal = { $toDouble: `$${F.grossTP}` }
-
     if (mode === 'summary') {
       const pipeline = [
-        { $match: query },
-        ...dateStages,
+        { $match: query }, ...dateStages,
         { $group: {
           _id: null,
           totalLines:    { $sum: 1 },
@@ -166,18 +170,13 @@ export async function GET(req: NextRequest) {
         }}
       ]
       const [result] = await col.aggregate(pipeline).toArray()
-      return NextResponse.json(result || {
-        totalLines:0,totalPcs:0,totalFreePcs:0,
-        totalGross:0,totalDiscount:0,totalNet:0,
-        uniqueOutlets:0,uniqueSOs:0
-      })
+      return NextResponse.json(result || { totalLines:0,totalPcs:0,totalFreePcs:0,totalGross:0,totalDiscount:0,totalNet:0,uniqueOutlets:0,uniqueSOs:0 })
     }
 
     if (mode === 'charts') {
-      // All charts ranked by Gross TP
+      // ALL charts use Gross TP
       const chartAgg = (groupBy: string) => [
-        { $match: query },
-        ...dateStages,
+        { $match: query }, ...dateStages,
         { $group: { _id: `$${groupBy}`, value: { $sum: grossVal } } },
         { $sort: { value: -1 } },
         { $limit: 8 },
@@ -204,19 +203,11 @@ export async function GET(req: NextRequest) {
       NetTP: Number(d[F.netTP]) || 0,
     })
 
-    if (dateStages.length > 0) {
-      const [countRes, docs] = await Promise.all([
-        col.aggregate([{ $match: query }, ...dateStages, { $count: 'n' }]).toArray(),
-        col.aggregate([{ $match: query }, ...dateStages, { $skip: page * pageSize }, { $limit: pageSize }]).toArray(),
-      ])
-      return NextResponse.json({ data: docs.map(mapDoc), total: countRes[0]?.n || 0, page, pageSize })
-    }
-
-    const [docs, total] = await Promise.all([
-      col.find(query).skip(page * pageSize).limit(pageSize).toArray(),
-      col.countDocuments(query),
+    const [countRes, docs] = await Promise.all([
+      col.aggregate([{ $match: query }, ...dateStages, { $count: 'n' }]).toArray(),
+      col.aggregate([{ $match: query }, ...dateStages, { $skip: page * pageSize }, { $limit: pageSize }]).toArray(),
     ])
-    return NextResponse.json({ data: docs.map(mapDoc), total, page, pageSize })
+    return NextResponse.json({ data: docs.map(mapDoc), total: countRes[0]?.n || 0, page, pageSize })
 
   } catch (err) {
     console.error('[API /orders]', err)
