@@ -20,19 +20,26 @@ interface Metrics {
   uniqueOutlets: number; uniqueSOs: number
 }
 interface ChartItem { name: string; value: number }
-interface Charts { byRegion: ChartItem[]; byTerritory: ChartItem[]; bySO: ChartItem[]; byArea: ChartItem[] }
+interface Charts {
+  byRegion: ChartItem[]; byArea: ChartItem[]; byTerritory: ChartItem[]
+  byTown: ChartItem[]; bySO: ChartItem[]
+}
 interface Order {
   OrderDate: string; Region: string; Area: string; Territory: string; Town: string
   SOName: string; OutletName: string; BrandName: string; SKUName: string
   OrderPcs: number; FreePcs: number; GrossTP: number; Discount: number; NetTP: number
 }
-interface Filters { regions: string[]; areas: string[]; territories: string[]; soNames: string[] }
+interface Filters {
+  regions: string[]; areas: string[]; territories: string[]
+  towns: string[]; soNames: string[]
+}
 
 function BarChart({ data, title }: { data: ChartItem[]; title: string }) {
   const max = data.length > 0 ? Math.max(...data.map(d => d.value)) : 1
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-      <p className="text-sm font-medium text-gray-700 mb-3">{title}</p>
+      <p className="text-sm font-medium text-gray-700 mb-1">{title}</p>
+      <p className="text-[10px] text-gray-400 mb-3">Gross Order Value (TP)</p>
       {data.length === 0
         ? <p className="text-xs text-gray-400 text-center py-6">No data</p>
         : <div className="space-y-2">
@@ -58,19 +65,20 @@ export default function Page() {
   const [region,    setRegion]    = useState('')
   const [area,      setArea]      = useState('')
   const [territory, setTerritory] = useState('')
+  const [town,      setTown]      = useState('')
   const [soName,    setSoName]    = useState('')
   const [search,    setSearch]    = useState('')
   const [dateFrom,  setDateFrom]  = useState('')
   const [dateTo,    setDateTo]    = useState('')
   const [page,      setPage]      = useState(0)
 
-  const [filters,  setFilters]  = useState<Filters>({ regions:[], areas:[], territories:[], soNames:[] })
-  const [metrics,  setMetrics]  = useState<Metrics | null>(null)
-  const [charts,   setCharts]   = useState<Charts>({ byRegion:[], byTerritory:[], bySO:[], byArea:[] })
-  const [orders,   setOrders]   = useState<Order[]>([])
-  const [total,    setTotal]    = useState(0)
-  const [loading,  setLoading]  = useState(true)
-  const [error,    setError]    = useState('')
+  const [filters, setFilters] = useState<Filters>({ regions:[], areas:[], territories:[], towns:[], soNames:[] })
+  const [metrics, setMetrics] = useState<Metrics | null>(null)
+  const [charts,  setCharts]  = useState<Charts>({ byRegion:[], byArea:[], byTerritory:[], byTown:[], bySO:[] })
+  const [orders,  setOrders]  = useState<Order[]>([])
+  const [total,   setTotal]   = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [error,   setError]   = useState('')
 
   const pageSize = 20
   const abortRef = useRef<AbortController | null>(null)
@@ -80,21 +88,24 @@ export default function Page() {
     if (region)    p.set('region',    region)
     if (area)      p.set('area',      area)
     if (territory) p.set('territory', territory)
+    if (town)      p.set('town',      town)
     if (soName)    p.set('soName',    soName)
     if (search)    p.set('search',    search)
     if (dateFrom)  p.set('dateFrom',  dateFrom)
     if (dateTo)    p.set('dateTo',    dateTo)
     if (extra) Object.entries(extra).forEach(([k, v]) => p.set(k, v))
     return p.toString()
-  }, [region, area, territory, soName, search, dateFrom, dateTo])
+  }, [region, area, territory, town, soName, search, dateFrom, dateTo])
 
+  // Cascading filter options
   useEffect(() => {
     fetch('/api/orders?mode=filters&' + buildQS())
       .then(r => r.json())
       .then((d: Filters) => setFilters(d))
       .catch(() => {})
-  }, [region, area, territory, buildQS])
+  }, [region, area, territory, town, buildQS])
 
+  // Main data fetch
   useEffect(() => {
     if (abortRef.current) abortRef.current.abort()
     const ctrl = new AbortController()
@@ -114,33 +125,35 @@ export default function Page() {
         setMetrics(s || null)
         setCharts({
           byRegion:    Array.isArray(c?.byRegion)    ? c.byRegion    : [],
-          byTerritory: Array.isArray(c?.byTerritory) ? c.byTerritory : [],
-          bySO:        Array.isArray(c?.bySO)        ? c.bySO        : [],
           byArea:      Array.isArray(c?.byArea)      ? c.byArea      : [],
+          byTerritory: Array.isArray(c?.byTerritory) ? c.byTerritory : [],
+          byTown:      Array.isArray(c?.byTown)      ? c.byTown      : [],
+          bySO:        Array.isArray(c?.bySO)        ? c.bySO        : [],
         })
         setOrders(Array.isArray(t?.data) ? t.data : [])
         setTotal(t?.total || 0)
         setLoading(false)
       })
       .catch(e => {
-        if (e.name !== 'AbortError') {
-          setError('Failed to load data.')
-          setLoading(false)
-        }
+        if (e.name !== 'AbortError') { setError('Failed to load data.'); setLoading(false) }
       })
   }, [buildQS, page])
 
-  const handleRegion    = (v: string) => { setRegion(v);    setArea(''); setTerritory(''); setSoName(''); setPage(0) }
-  const handleArea      = (v: string) => { setArea(v);      setTerritory(''); setSoName(''); setPage(0) }
-  const handleTerritory = (v: string) => { setTerritory(v); setSoName(''); setPage(0) }
+  // Cascading reset handlers
+  const handleRegion    = (v: string) => { setRegion(v);    setArea(''); setTerritory(''); setTown(''); setSoName(''); setPage(0) }
+  const handleArea      = (v: string) => { setArea(v);      setTerritory(''); setTown(''); setSoName(''); setPage(0) }
+  const handleTerritory = (v: string) => { setTerritory(v); setTown(''); setSoName(''); setPage(0) }
+  const handleTown      = (v: string) => { setTown(v);      setSoName(''); setPage(0) }
   const handleSO        = (v: string) => { setSoName(v);    setPage(0) }
-  const clearAll        = () => { setRegion(''); setArea(''); setTerritory(''); setSoName(''); setSearch(''); setDateFrom(''); setDateTo(''); setPage(0) }
+  const clearAll        = () => {
+    setRegion(''); setArea(''); setTerritory(''); setTown('')
+    setSoName(''); setSearch(''); setDateFrom(''); setDateTo(''); setPage(0)
+  }
 
-  const hasFilters = region || area || territory || soName || search || dateFrom || dateTo
+  const hasFilters = region || area || territory || town || soName || search || dateFrom || dateTo
   const totalPages = Math.ceil(total / pageSize)
-
-  const selCls = 'text-sm px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-700 cursor-pointer focus:outline-none hover:border-blue-400 transition-colors'
-  const btnCls = 'px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed'
+  const selCls  = 'text-sm px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-700 cursor-pointer focus:outline-none hover:border-blue-400 transition-colors'
+  const btnCls  = 'px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed'
   const dateCls = 'text-sm px-2 py-1 rounded-lg border border-gray-200 bg-white text-gray-700 focus:outline-none cursor-pointer'
 
   return (
@@ -151,21 +164,23 @@ export default function Page() {
             <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-xs">R</div>
             <div>
               <h1 className="text-sm font-semibold text-gray-900">RHBL Order Dashboard</h1>
-              <p className="text-xs text-gray-400">Based On N-1 Data</p>
+              <p className="text-xs text-gray-400">Live data from MongoDB</p>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Date range */}
             <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1">
               <span className="text-xs text-gray-400">From</span>
               <input type="date" className={dateCls} value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPage(0) }} />
               <span className="text-xs text-gray-400">To</span>
-              <input type="date" className={dateCls} value={dateTo} onChange={e => { setDateTo(e.target.value); setPage(0) }} />
+              <input type="date" className={dateCls} value={dateTo}   onChange={e => { setDateTo(e.target.value);   setPage(0) }} />
             </div>
-            <select className={selCls} value={region} onChange={e => handleRegion(e.target.value)}>
+            {/* Cascading dropdowns: Region → Area → Territory → Town → SO */}
+            <select className={selCls} value={region}    onChange={e => handleRegion(e.target.value)}>
               <option value="">All Regions</option>
               {filters.regions.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
-            <select className={selCls} value={area} onChange={e => handleArea(e.target.value)}>
+            <select className={selCls} value={area}      onChange={e => handleArea(e.target.value)}>
               <option value="">All Areas</option>
               {filters.areas.map(a => <option key={a} value={a}>{a}</option>)}
             </select>
@@ -173,7 +188,11 @@ export default function Page() {
               <option value="">All Territories</option>
               {filters.territories.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
-            <select className={selCls} value={soName} onChange={e => handleSO(e.target.value)}>
+            <select className={selCls} value={town}      onChange={e => handleTown(e.target.value)}>
+              <option value="">All Towns</option>
+              {filters.towns.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <select className={selCls} value={soName}    onChange={e => handleSO(e.target.value)}>
               <option value="">All SOs</option>
               {filters.soNames.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -189,14 +208,15 @@ export default function Page() {
       <main className="max-w-screen-xl mx-auto px-4 py-6 space-y-5">
         {error && <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 text-sm">⚠️ {error}</div>}
 
+        {/* Metric cards */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {[
-            { label:'Order lines', value: metrics != null ? String(metrics.totalLines ?? 0)          : '—', sub:'',                                                                color:'#3266ad' },
-            { label:'Total pcs',   value: metrics != null ? String(metrics.totalPcs   ?? 0)          : '—', sub:'Free: '+String(metrics != null ? (metrics.totalFreePcs??0) : 0), color:'#1d9e75' },
-            { label:'Gross TP',    value: metrics != null ? fmtShort(metrics.totalGross    ?? 0)     : '—', sub:'',                                                                color:'#1d9e75' },
-            { label:'Discount',    value: metrics != null ? fmtShort(metrics.totalDiscount ?? 0)     : '—', sub:'',                                                                color:'#d85a30' },
-            { label:'Net TP',      value: metrics != null ? fmtShort(metrics.totalNet      ?? 0)     : '—', sub:'',                                                                color:'#534ab7' },
-            { label:'Outlets',     value: metrics != null ? String(metrics.uniqueOutlets   ?? 0)     : '—', sub:String(metrics != null ? (metrics.uniqueSOs??0) : 0)+' SOs',      color:'#993556' },
+            { label:'Order lines', value: metrics != null ? String(metrics.totalLines ?? 0)          : '—', sub:'',                                                                 color:'#3266ad' },
+            { label:'Total pcs',   value: metrics != null ? String(metrics.totalPcs   ?? 0)          : '—', sub:'Free: '+String(metrics != null ? (metrics.totalFreePcs??0) : 0),  color:'#1d9e75' },
+            { label:'Gross TP',    value: metrics != null ? fmtShort(metrics.totalGross    ?? 0)     : '—', sub:'',                                                                 color:'#1d9e75' },
+            { label:'Discount',    value: metrics != null ? fmtShort(metrics.totalDiscount ?? 0)     : '—', sub:'',                                                                 color:'#d85a30' },
+            { label:'Net TP',      value: metrics != null ? fmtShort(metrics.totalNet      ?? 0)     : '—', sub:'',                                                                 color:'#534ab7' },
+            { label:'Outlets',     value: metrics != null ? String(metrics.uniqueOutlets   ?? 0)     : '—', sub:String(metrics != null ? (metrics.uniqueSOs??0) : 0)+' SOs',       color:'#993556' },
           ].map((m, i) => (
             <div key={i} style={{ borderLeft: '4px solid ' + m.color }} className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
               <p className="text-xs text-gray-500 mb-1">{m.label}</p>
@@ -206,18 +226,21 @@ export default function Page() {
           ))}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Charts — 5 charts: Region, Area, Territory, Town, SO */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           {loading
-            ? [1,2,3,4].map(i => <div key={i} className="bg-gray-100 rounded-xl h-48 animate-pulse" />)
+            ? [1,2,3,4,5].map(i => <div key={i} className="bg-gray-100 rounded-xl h-48 animate-pulse" />)
             : <>
-                <BarChart data={charts.byRegion}    title="Net TP by Region" />
-                <BarChart data={charts.byTerritory} title="Net TP by Territory" />
-                <BarChart data={charts.bySO}        title="Top SOs by Net TP" />
-                <BarChart data={charts.byArea}      title="Net TP by Area" />
+                <BarChart data={charts.byRegion}    title="By Region" />
+                <BarChart data={charts.byArea}      title="By Area" />
+                <BarChart data={charts.byTerritory} title="By Territory" />
+                <BarChart data={charts.byTown}      title="By Town" />
+                <BarChart data={charts.bySO}        title="Top SOs" />
               </>
           }
         </div>
 
+        {/* Table */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-gray-100 flex items-center gap-3 flex-wrap">
             <h2 className="text-sm font-medium text-gray-800 flex-1">
