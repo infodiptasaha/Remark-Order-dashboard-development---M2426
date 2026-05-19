@@ -9,6 +9,7 @@ export async function GET(req: NextRequest) {
     const region    = searchParams.get('region')    || ''
     const area      = searchParams.get('area')      || ''
     const territory = searchParams.get('territory') || ''
+    const town      = searchParams.get('town')      || ''
     const soName    = searchParams.get('soName')    || ''
     const search    = searchParams.get('search')    || ''
     const dateFrom  = searchParams.get('dateFrom')  || ''
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest) {
 
     const sample = await col.findOne({})
     if (!sample) {
-      if (mode === 'filters')  return NextResponse.json({ regions:[],areas:[],territories:[],soNames:[] })
+      if (mode === 'filters')  return NextResponse.json({ regions:[],areas:[],territories:[],towns:[],soNames:[] })
       if (mode === 'summary')  return NextResponse.json({ totalLines:0,totalPcs:0,totalFreePcs:0,totalGross:0,totalDiscount:0,totalNet:0,uniqueOutlets:0,uniqueSOs:0 })
       if (mode === 'charts')   return NextResponse.json({ byRegion:[],byTerritory:[],bySO:[],byArea:[] })
       return NextResponse.json({ data:[],total:0,page:0,pageSize })
@@ -35,8 +36,8 @@ export async function GET(req: NextRequest) {
       region:     f(['Region']),
       area:       f(['Area']),
       territory:  f(['Territory']),
-      soName:     f(['SO Name','SOName']),
       town:       f(['Town']),
+      soName:     f(['SO Name','SOName']),
       outlet:     f(['Outlet Name','OutletName']),
       outletCode: f(['Outlet Code','OutletCode']),
       soCode:     f(['SO Code','SOCode']),
@@ -54,6 +55,7 @@ export async function GET(req: NextRequest) {
     if (region)    query[F.region]    = region
     if (area)      query[F.area]      = area
     if (territory) query[F.territory] = territory
+    if (town)      query[F.town]      = town
     if (soName)    query[F.soName]    = soName
     if (search) {
       query['$or'] = [
@@ -120,21 +122,26 @@ export async function GET(req: NextRequest) {
     }
 
     if (mode === 'filters') {
-      const [regions, areas, territories, soNames] = await Promise.all([
-        col.distinct(F.region, {}),
+      const [regions, areas, territories, towns, soNames] = await Promise.all([
+        col.distinct(F.region,    {}),
         col.distinct(F.area,      query),
         col.distinct(F.territory, query),
+        col.distinct(F.town,      query),
         col.distinct(F.soName,    query),
       ])
       return NextResponse.json({
         regions:     regions.filter(Boolean).sort(),
         areas:       areas.filter(Boolean).sort(),
         territories: territories.filter(Boolean).sort(),
+        towns:       towns.filter(Boolean).sort(),
         soNames:     soNames.filter(Boolean).sort(),
       })
     }
 
     const dateStages = buildDateStages()
+
+    // ── VALUE field = Gross TP everywhere ──────────────────
+    const grossVal = { $toDouble: `$${F.grossTP}` }
 
     if (mode === 'summary') {
       const pipeline = [
@@ -145,7 +152,7 @@ export async function GET(req: NextRequest) {
           totalLines:    { $sum: 1 },
           totalPcs:      { $sum: { $toDouble: `$${F.orderPcs}` } },
           totalFreePcs:  { $sum: { $toDouble: `$${F.freePcs}`  } },
-          totalGross:    { $sum: { $toDouble: `$${F.grossTP}`  } },
+          totalGross:    { $sum: grossVal },
           totalDiscount: { $sum: { $toDouble: `$${F.discount}` } },
           totalNet:      { $sum: { $toDouble: `$${F.netTP}`    } },
           outlets:       { $addToSet: `$${F.outletCode}` },
@@ -167,47 +174,26 @@ export async function GET(req: NextRequest) {
     }
 
     if (mode === 'charts') {
+      // All charts ranked by Gross TP
       const chartAgg = (groupBy: string) => [
         { $match: query },
         ...dateStages,
-        { $group: { _id: `$${groupBy}`, value: { $sum: { $toDouble: `$${F.netTP}` } } } },
+        { $group: { _id: `$${groupBy}`, value: { $sum: grossVal } } },
         { $sort: { value: -1 } },
         { $limit: 8 },
         { $project: { _id:0, name:'$_id', value:1 } },
       ]
-      const [byRegion, byTerritory, bySO, byArea] = await Promise.all([
+      const [byRegion, byArea, byTerritory, byTown, bySO] = await Promise.all([
         col.aggregate(chartAgg(F.region)).toArray(),
-        col.aggregate(chartAgg(F.territory)).toArray(),
-        col.aggregate(chartAgg(F.soName)).toArray(),
         col.aggregate(chartAgg(F.area)).toArray(),
+        col.aggregate(chartAgg(F.territory)).toArray(),
+        col.aggregate(chartAgg(F.town)).toArray(),
+        col.aggregate(chartAgg(F.soName)).toArray(),
       ])
-      return NextResponse.json({ byRegion, byTerritory, bySO, byArea })
+      return NextResponse.json({ byRegion, byArea, byTerritory, byTown, bySO })
     }
 
-    if (dateStages.length > 0) {
-      const [countRes, docs] = await Promise.all([
-        col.aggregate([{ $match: query }, ...dateStages, { $count: 'n' }]).toArray(),
-        col.aggregate([{ $match: query }, ...dateStages, { $skip: page * pageSize }, { $limit: pageSize }]).toArray(),
-      ])
-      const total = countRes[0]?.n || 0
-      const data = docs.map((d: Record<string, unknown>) => ({
-        OrderDate: String(d[F.orderDate] ?? ''), Region: String(d[F.region] ?? ''),
-        Area: String(d[F.area] ?? ''), Territory: String(d[F.territory] ?? ''),
-        Town: String(d[F.town] ?? ''), SOName: String(d[F.soName] ?? ''),
-        OutletName: String(d[F.outlet] ?? ''), BrandName: String(d[F.brand] ?? ''),
-        SKUName: String(d[F.skuName] ?? ''),
-        OrderPcs: Number(d[F.orderPcs]) || 0, FreePcs: Number(d[F.freePcs]) || 0,
-        GrossTP: Number(d[F.grossTP]) || 0, Discount: Number(d[F.discount]) || 0,
-        NetTP: Number(d[F.netTP]) || 0,
-      }))
-      return NextResponse.json({ data, total, page, pageSize })
-    }
-
-    const [docs, total] = await Promise.all([
-      col.find(query).skip(page * pageSize).limit(pageSize).toArray(),
-      col.countDocuments(query),
-    ])
-    const data = docs.map((d: Record<string, unknown>) => ({
+    const mapDoc = (d: Record<string, unknown>) => ({
       OrderDate: String(d[F.orderDate] ?? ''), Region: String(d[F.region] ?? ''),
       Area: String(d[F.area] ?? ''), Territory: String(d[F.territory] ?? ''),
       Town: String(d[F.town] ?? ''), SOName: String(d[F.soName] ?? ''),
@@ -216,8 +202,21 @@ export async function GET(req: NextRequest) {
       OrderPcs: Number(d[F.orderPcs]) || 0, FreePcs: Number(d[F.freePcs]) || 0,
       GrossTP: Number(d[F.grossTP]) || 0, Discount: Number(d[F.discount]) || 0,
       NetTP: Number(d[F.netTP]) || 0,
-    }))
-    return NextResponse.json({ data, total, page, pageSize })
+    })
+
+    if (dateStages.length > 0) {
+      const [countRes, docs] = await Promise.all([
+        col.aggregate([{ $match: query }, ...dateStages, { $count: 'n' }]).toArray(),
+        col.aggregate([{ $match: query }, ...dateStages, { $skip: page * pageSize }, { $limit: pageSize }]).toArray(),
+      ])
+      return NextResponse.json({ data: docs.map(mapDoc), total: countRes[0]?.n || 0, page, pageSize })
+    }
+
+    const [docs, total] = await Promise.all([
+      col.find(query).skip(page * pageSize).limit(pageSize).toArray(),
+      col.countDocuments(query),
+    ])
+    return NextResponse.json({ data: docs.map(mapDoc), total, page, pageSize })
 
   } catch (err) {
     console.error('[API /orders]', err)
