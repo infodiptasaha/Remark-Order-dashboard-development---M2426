@@ -107,7 +107,14 @@ export default function Page() {
   useEffect(() => {
     fetch('/api/orders?mode=filters&' + buildQS())
       .then(r => r.json())
-      .then((d: Filters) => setFilters(d))
+      .then((d: Filters) => setFilters({
+        regions:     Array.isArray(d?.regions)     ? d.regions     : [],
+        areas:       Array.isArray(d?.areas)       ? d.areas       : [],
+        territories: Array.isArray(d?.territories) ? d.territories : [],
+        towns:       Array.isArray(d?.towns)       ? d.towns       : [],
+        soNames:     Array.isArray(d?.soNames)     ? d.soNames     : [],
+        brands:      Array.isArray(d?.brands)      ? d.brands      : [],
+      }))
       .catch(() => {})
   }, [region, area, territory, town, soName, buildQS])
 
