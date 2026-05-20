@@ -9,7 +9,7 @@
   "outputDirectory": ".next",
   "crons": [
     {
-      "path": "/api/cron?secret=REPLACE_WITH_YOUR_SECRET",
+      "path": "/api/cron?secret=rhbl2026cron",
       "schedule": "0 1 * * *"
     }
   ]
