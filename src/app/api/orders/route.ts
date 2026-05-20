@@ -22,20 +22,19 @@ export async function GET(req: NextRequest) {
     const db  = await connectDB()
     const col = db.collection('ORDER_DATA')
 
-    // Default date range = current month if no date provided
+    // Default = current month
     const now = new Date()
     const defaultFrom = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-01'
     const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
     const defaultTo = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(lastDay).padStart(2, '0')
-
     const effectiveFrom = dateFrom || defaultFrom
     const effectiveTo   = dateTo   || defaultTo
 
     const sample = await col.findOne({})
     if (!sample) {
-      if (mode === 'filters')  return NextResponse.json({ regions:[],areas:[],territories:[],towns:[],soNames:[],brands:[] })
-      if (mode === 'summary')  return NextResponse.json({ totalLines:0,totalPcs:0,totalFreePcs:0,totalGross:0,totalDiscount:0,totalNet:0,uniqueOutlets:0,uniqueSOs:0 })
-      if (mode === 'charts')   return NextResponse.json({ byRegion:[],byArea:[],byTerritory:[],byTown:[],bySO:[] })
+      if (mode === 'filters') return NextResponse.json({ soNames:[], brands:[] })
+      if (mode === 'summary') return NextResponse.json({ totalLines:0,totalPcs:0,totalFreePcs:0,totalGross:0,totalDiscount:0,totalNet:0,uniqueOutlets:0,uniqueSOs:0 })
+      if (mode === 'charts')  return NextResponse.json({ byRegion:[],byArea:[],byTerritory:[],byTown:[],bySO:[] })
       return NextResponse.json({ data:[],total:0,page:0,pageSize })
     }
 
@@ -61,7 +60,6 @@ export async function GET(req: NextRequest) {
       netTP:      f(['Net Order Value(TP)','NetTP']),
     }
 
-    // Base query (non-date)
     const query: Record<string, unknown> = {}
     if (region)    query[F.region]    = region
     if (area)      query[F.area]      = area
@@ -78,7 +76,6 @@ export async function GET(req: NextRequest) {
       ]
     }
 
-    // Date pipeline — always active (default = current month)
     const dateStages = [
       {
         $addFields: {
@@ -126,25 +123,17 @@ export async function GET(req: NextRequest) {
       { $match: { _d: { $gte: effectiveFrom, $lte: effectiveTo } } }
     ]
 
-    // Gross TP value field
     const grossVal = { $toDouble: `$${F.grossTP}` }
 
+    // filters mode — only SO and Brand (geo comes from /api/geo)
     if (mode === 'filters') {
-      const [regions, areas, territories, towns, soNames, brands] = await Promise.all([
-        col.distinct(F.region,    {}),
-        col.distinct(F.area,      query),
-        col.distinct(F.territory, query),
-        col.distinct(F.town,      query),
-        col.distinct(F.soName,    query),
-        col.distinct(F.brand,     query),
+      const [soNames, brands] = await Promise.all([
+        col.distinct(F.soName, query),
+        col.distinct(F.brand,  query),
       ])
       return NextResponse.json({
-        regions:     regions.filter(Boolean).sort(),
-        areas:       areas.filter(Boolean).sort(),
-        territories: territories.filter(Boolean).sort(),
-        towns:       towns.filter(Boolean).sort(),
-        soNames:     soNames.filter(Boolean).sort(),
-        brands:      brands.filter(Boolean).sort(),
+        soNames: soNames.filter(Boolean).sort(),
+        brands:  brands.filter(Boolean).sort(),
       })
     }
 
@@ -174,7 +163,6 @@ export async function GET(req: NextRequest) {
     }
 
     if (mode === 'charts') {
-      // ALL charts use Gross TP
       const chartAgg = (groupBy: string) => [
         { $match: query }, ...dateStages,
         { $group: { _id: `$${groupBy}`, value: { $sum: grossVal } } },
