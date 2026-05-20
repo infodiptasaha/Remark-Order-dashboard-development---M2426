@@ -1,15 +1,10 @@
 {
   "framework": "nextjs",
   "buildCommand": "npm run build",
-  "outputDirectory": ".next"
-}
-{
-  "framework": "nextjs",
-  "buildCommand": "npm run build",
   "outputDirectory": ".next",
   "crons": [
     {
-      "path": "/api/cron?secret=rhbl2026cron",
+      "path": "/api/cron",
       "schedule": "0 1 * * *"
     }
   ]
