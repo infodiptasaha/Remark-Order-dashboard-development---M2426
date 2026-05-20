@@ -32,9 +32,11 @@ interface Order {
   SOName: string; OutletName: string; BrandName: string; SKUName: string
   OrderPcs: number; FreePcs: number; GrossTP: number; Discount: number; NetTP: number
 }
-interface Filters {
-  regions: string[]; areas: string[]; territories: string[]
-  towns: string[]; soNames: string[]; brands: string[]
+interface GeoFilters {
+  regions: string[]; areas: string[]; territories: string[]; towns: string[]
+}
+interface OrderFilters {
+  soNames: string[]; brands: string[]
 }
 
 function BarChart({ data, title }: { data: ChartItem[]; title: string }) {
@@ -76,9 +78,15 @@ export default function MainDashboard() {
   const [dateTo,    setDateTo]    = useState('')
   const [page,      setPage]      = useState(0)
 
-  const [filters, setFilters] = useState<Filters>({
-    regions:[], areas:[], territories:[], towns:[], soNames:[], brands:[]
+  // Geo filters from GEO_MODEL (not date-restricted)
+  const [geo, setGeo] = useState<GeoFilters>({
+    regions:[], areas:[], territories:[], towns:[]
   })
+  // SO + Brand from ORDER_DATA (date-restricted)
+  const [orderFilters, setOrderFilters] = useState<OrderFilters>({
+    soNames:[], brands:[]
+  })
+
   const [metrics, setMetrics] = useState<Metrics | null>(null)
   const [charts,  setCharts]  = useState<Charts>({
     byRegion:[], byArea:[], byTerritory:[], byTown:[], bySO:[]
@@ -91,6 +99,16 @@ export default function MainDashboard() {
   const pageSize = 20
   const abortRef = useRef<AbortController | null>(null)
 
+  // Geo QS — only geo params, no date
+  const geoQS = useCallback(() => {
+    const p = new URLSearchParams()
+    if (region)    p.set('region',    region)
+    if (area)      p.set('area',      area)
+    if (territory) p.set('territory', territory)
+    return p.toString()
+  }, [region, area, territory])
+
+  // Full QS — all params
   const buildQS = useCallback((extra?: Record<string, string>) => {
     const p = new URLSearchParams()
     if (region)    p.set('region',    region)
@@ -106,20 +124,31 @@ export default function MainDashboard() {
     return p.toString()
   }, [region, area, territory, town, soName, brand, search, dateFrom, dateTo])
 
+  // Fetch geo options (Region/Area/Territory/Town) — not affected by date
   useEffect(() => {
-    fetch('/api/orders?mode=filters&' + buildQS())
+    fetch('/api/geo?' + geoQS())
       .then(r => r.json())
-      .then((d: Filters) => setFilters({
+      .then((d: GeoFilters) => setGeo({
         regions:     Array.isArray(d?.regions)     ? d.regions     : [],
         areas:       Array.isArray(d?.areas)       ? d.areas       : [],
         territories: Array.isArray(d?.territories) ? d.territories : [],
         towns:       Array.isArray(d?.towns)       ? d.towns       : [],
-        soNames:     Array.isArray(d?.soNames)     ? d.soNames     : [],
-        brands:      Array.isArray(d?.brands)      ? d.brands      : [],
       }))
       .catch(() => {})
-  }, [region, area, territory, town, soName, buildQS])
+  }, [geoQS])
 
+  // Fetch SO + Brand options — affected by geo + date
+  useEffect(() => {
+    fetch('/api/orders?mode=filters&' + buildQS())
+      .then(r => r.json())
+      .then((d: OrderFilters) => setOrderFilters({
+        soNames: Array.isArray(d?.soNames) ? d.soNames : [],
+        brands:  Array.isArray(d?.brands)  ? d.brands  : [],
+      }))
+      .catch(() => {})
+  }, [buildQS])
+
+  // Main data fetch
   useEffect(() => {
     if (abortRef.current) abortRef.current.abort()
     const ctrl = new AbortController()
@@ -178,7 +207,6 @@ export default function MainDashboard() {
 
   return (
     <div className="min-h-full bg-gray-50">
-      {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
         <div className="px-4 py-2.5">
           <div className="flex items-center justify-between gap-3 mb-2">
@@ -197,35 +225,36 @@ export default function MainDashboard() {
                 onChange={e => { setDateTo(e.target.value); setPage(0) }} />
             </div>
           </div>
+
           <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
             <select className={selCls} value={region}    onChange={e => handleRegion(e.target.value)}    style={{flex:'1 1 90px'}}>
               <option value="">All Regions</option>
-              {filters.regions.map(r => <option key={r} value={r}>{r}</option>)}
+              {geo.regions.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
             <span className="text-gray-300 text-xs shrink-0">›</span>
             <select className={selCls} value={area}      onChange={e => handleArea(e.target.value)}      style={{flex:'1 1 90px'}}>
               <option value="">All Areas</option>
-              {filters.areas.map(a => <option key={a} value={a}>{a}</option>)}
+              {geo.areas.map(a => <option key={a} value={a}>{a}</option>)}
             </select>
             <span className="text-gray-300 text-xs shrink-0">›</span>
             <select className={selCls} value={territory} onChange={e => handleTerritory(e.target.value)} style={{flex:'1 1 100px'}}>
               <option value="">All Territories</option>
-              {filters.territories.map(t => <option key={t} value={t}>{t}</option>)}
+              {geo.territories.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
             <span className="text-gray-300 text-xs shrink-0">›</span>
             <select className={selCls} value={town}      onChange={e => handleTown(e.target.value)}      style={{flex:'1 1 90px'}}>
               <option value="">All Towns</option>
-              {filters.towns.map(t => <option key={t} value={t}>{t}</option>)}
+              {geo.towns.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
             <span className="text-gray-300 text-xs shrink-0">›</span>
             <select className={selCls} value={soName}    onChange={e => handleSO(e.target.value)}        style={{flex:'1 1 110px'}}>
               <option value="">All SOs</option>
-              {filters.soNames.map(s => <option key={s} value={s}>{s}</option>)}
+              {orderFilters.soNames.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
             <span className="text-gray-300 text-xs shrink-0">›</span>
             <select className={selCls} value={brand}     onChange={e => handleBrand(e.target.value)}     style={{flex:'1 1 90px'}}>
               <option value="">All Brands</option>
-              {filters.brands.map(b => <option key={b} value={b}>{b}</option>)}
+              {orderFilters.brands.map(b => <option key={b} value={b}>{b}</option>)}
             </select>
             {hasFilters && (
               <button onClick={clearAll}
@@ -242,7 +271,6 @@ export default function MainDashboard() {
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 text-sm">⚠️ {error}</div>
         )}
 
-        {/* Metric cards */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {[
             { label:'Order lines', value: metrics != null ? String(metrics.totalLines ?? 0)      : '—', sub:'',                                                                color:'#3266ad' },
@@ -261,7 +289,6 @@ export default function MainDashboard() {
           ))}
         </div>
 
-        {/* Charts */}
         <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           {loading
             ? [1,2,3,4,5].map(i => <div key={i} className="bg-gray-100 rounded-xl h-48 animate-pulse" />)
@@ -275,7 +302,6 @@ export default function MainDashboard() {
           }
         </div>
 
-        {/* Table */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-gray-100 flex items-center gap-3 flex-wrap">
             <h2 className="text-sm font-medium text-gray-800 flex-1">
