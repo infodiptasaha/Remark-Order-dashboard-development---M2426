@@ -4,19 +4,19 @@ import { connectDB } from '@/lib/mongodb'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
-  // Verify cron secret so nobody else can trigger it
-  const secret = req.headers.get('x-cron-secret') || req.nextUrl.searchParams.get('secret')
-  if (secret !== process.env.CRON_SECRET) {
+  // Only allow Vercel cron calls
+  const isVercel = req.headers.get('x-vercel-cron') === '1'
+  if (!isVercel) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   try {
-    const db     = await connectDB()
+    const db       = await connectDB()
     const orders   = db.collection('ORDER_DATA')
     const geoModel = db.collection('GEO_MODEL')
 
     const sample = await orders.findOne({})
-    if (!sample) return NextResponse.json({ ok: false, message: 'No data' })
+    if (!sample) return NextResponse.json({ ok: false, message: 'No order data found' })
 
     const keys = Object.keys(sample)
     const f = (candidates: string[]) => candidates.find(c => keys.includes(c)) || candidates[0]
@@ -28,21 +28,25 @@ export async function GET(req: NextRequest) {
     }
 
     const combos = await orders.aggregate([
-      { $group: {
-        _id: {
-          region:    `$${F.region}`,
-          area:      `$${F.area}`,
-          territory: `$${F.territory}`,
-          town:      `$${F.town}`,
+      {
+        $group: {
+          _id: {
+            region:    `$${F.region}`,
+            area:      `$${F.area}`,
+            territory: `$${F.territory}`,
+            town:      `$${F.town}`,
+          }
         }
-      }},
-      { $project: {
-        _id: 0,
-        region:    '$_id.region',
-        area:      '$_id.area',
-        territory: '$_id.territory',
-        town:      '$_id.town',
-      }}
+      },
+      {
+        $project: {
+          _id: 0,
+          region:    '$_id.region',
+          area:      '$_id.area',
+          territory: '$_id.territory',
+          town:      '$_id.town',
+        }
+      }
     ]).toArray()
 
     await geoModel.deleteMany({})
@@ -59,12 +63,16 @@ export async function GET(req: NextRequest) {
       { upsert: true }
     )
 
+    console.log(`[CRON] GEO_MODEL rebuilt: ${combos.length} combinations`)
+
     return NextResponse.json({
       ok: true,
       rebuilt: combos.length,
       ts: new Date().toISOString()
     })
+
   } catch (err) {
+    console.error('[CRON] Error:', err)
     return NextResponse.json({ ok: false, error: String(err) }, { status: 500 })
   }
 }
