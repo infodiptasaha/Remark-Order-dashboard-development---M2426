@@ -78,15 +78,12 @@ export default function MainDashboard() {
   const [dateTo,    setDateTo]    = useState('')
   const [page,      setPage]      = useState(0)
 
-  // Geo filters from GEO_MODEL (not date-restricted)
   const [geo, setGeo] = useState<GeoFilters>({
     regions:[], areas:[], territories:[], towns:[]
   })
-  // SO + Brand from ORDER_DATA (date-restricted)
   const [orderFilters, setOrderFilters] = useState<OrderFilters>({
     soNames:[], brands:[]
   })
-
   const [metrics, setMetrics] = useState<Metrics | null>(null)
   const [charts,  setCharts]  = useState<Charts>({
     byRegion:[], byArea:[], byTerritory:[], byTown:[], bySO:[]
@@ -99,16 +96,18 @@ export default function MainDashboard() {
   const pageSize = 20
   const abortRef = useRef<AbortController | null>(null)
 
-  // Geo QS — only geo params, no date
+  // Geo QS — includes date so dropdowns match selected month
   const geoQS = useCallback(() => {
     const p = new URLSearchParams()
     if (region)    p.set('region',    region)
     if (area)      p.set('area',      area)
     if (territory) p.set('territory', territory)
+    if (dateFrom)  p.set('dateFrom',  dateFrom)
+    if (dateTo)    p.set('dateTo',    dateTo)
     return p.toString()
-  }, [region, area, territory])
+  }, [region, area, territory, dateFrom, dateTo])
 
-  // Full QS — all params
+  // Full QS
   const buildQS = useCallback((extra?: Record<string, string>) => {
     const p = new URLSearchParams()
     if (region)    p.set('region',    region)
@@ -124,7 +123,7 @@ export default function MainDashboard() {
     return p.toString()
   }, [region, area, territory, town, soName, brand, search, dateFrom, dateTo])
 
-  // Fetch geo options (Region/Area/Territory/Town) — not affected by date
+  // Fetch geo — updates when date or geo selection changes
   useEffect(() => {
     fetch('/api/geo?' + geoQS())
       .then(r => r.json())
@@ -137,7 +136,7 @@ export default function MainDashboard() {
       .catch(() => {})
   }, [geoQS])
 
-  // Fetch SO + Brand options — affected by geo + date
+  // Fetch SO + Brand
   useEffect(() => {
     fetch('/api/orders?mode=filters&' + buildQS())
       .then(r => r.json())
@@ -219,7 +218,7 @@ export default function MainDashboard() {
             <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1 shrink-0">
               <span className="text-xs text-gray-400">From</span>
               <input type="date" className={dateCls} value={dateFrom}
-                onChange={e => { setDateFrom(e.target.value); setPage(0) }} />
+                onChange={e => { setDateFrom(e.target.value); setArea(''); setTerritory(''); setTown(''); setSoName(''); setBrand(''); setPage(0) }} />
               <span className="text-xs text-gray-400">To</span>
               <input type="date" className={dateCls} value={dateTo}
                 onChange={e => { setDateTo(e.target.value); setPage(0) }} />
