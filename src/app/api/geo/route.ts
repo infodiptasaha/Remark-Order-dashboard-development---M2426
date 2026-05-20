@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
       area:      f(['Area']),
       territory: f(['Territory']),
       town:      f(['Town']),
-      orderDate: f(['OrderDate','Order Date']),
+      orderDate: f(['OrderDate', 'Order Date']),
     }
 
     // Current month default
@@ -38,87 +38,80 @@ export async function GET(req: NextRequest) {
     const effectiveFrom = dateFrom || defaultFrom
     const effectiveTo   = dateTo   || defaultTo
 
-    // Date conversion pipeline stage
-    const dateStages = [
-      {
-        $addFields: {
-          _d: {
-            $cond: {
-              if: { $regexMatch: { input: { $ifNull: [`$${F.orderDate}`, ''] }, regex: '^\\d{4}-\\d{2}-\\d{2}$' } },
-              then: { $ifNull: [`$${F.orderDate}`, ''] },
-              else: {
-                $let: {
-                  vars: { raw: { $ifNull: [`$${F.orderDate}`, ''] } },
-                  in: {
-                    $concat: [
-                      { $cond: [{ $lte: [{ $toInt: { $substr: ['$$raw', 7, 2] } }, 50] }, '20', '19'] },
-                      { $substr: ['$$raw', 7, 2] }, '-',
-                      { $switch: {
-                        branches: [
-                          { case: { $regexMatch: { input: '$$raw', regex: 'Jan' } }, then: '01' },
-                          { case: { $regexMatch: { input: '$$raw', regex: 'Feb' } }, then: '02' },
-                          { case: { $regexMatch: { input: '$$raw', regex: 'Mar' } }, then: '03' },
-                          { case: { $regexMatch: { input: '$$raw', regex: 'Apr' } }, then: '04' },
-                          { case: { $regexMatch: { input: '$$raw', regex: 'May' } }, then: '05' },
-                          { case: { $regexMatch: { input: '$$raw', regex: 'Jun' } }, then: '06' },
-                          { case: { $regexMatch: { input: '$$raw', regex: 'Jul' } }, then: '07' },
-                          { case: { $regexMatch: { input: '$$raw', regex: 'Aug' } }, then: '08' },
-                          { case: { $regexMatch: { input: '$$raw', regex: 'Sep' } }, then: '09' },
-                          { case: { $regexMatch: { input: '$$raw', regex: 'Oct' } }, then: '10' },
-                          { case: { $regexMatch: { input: '$$raw', regex: 'Nov' } }, then: '11' },
-                          { case: { $regexMatch: { input: '$$raw', regex: 'Dec' } }, then: '12' },
-                        ],
-                        default: '00'
-                      }}, '-',
-                      { $cond: [
-                        { $lte: [{ $strLenCP: { $substr: ['$$raw', 0, 2] } }, 1] },
-                        { $concat: ['0', { $substr: ['$$raw', 0, 1] }] },
-                        { $substr: ['$$raw', 0, 2] }
-                      ]}
-                    ]
-                  }
+    // Date conversion stage
+    const dateConvertStage = {
+      $addFields: {
+        _d: {
+          $cond: {
+            if: { $regexMatch: { input: { $ifNull: [`$${F.orderDate}`, ''] }, regex: '^\\d{4}-\\d{2}-\\d{2}$' } },
+            then: { $ifNull: [`$${F.orderDate}`, ''] },
+            else: {
+              $let: {
+                vars: { raw: { $ifNull: [`$${F.orderDate}`, ''] } },
+                in: {
+                  $concat: [
+                    { $cond: [{ $lte: [{ $toInt: { $substr: ['$$raw', 7, 2] } }, 50] }, '20', '19'] },
+                    { $substr: ['$$raw', 7, 2] }, '-',
+                    { $switch: {
+                      branches: [
+                        { case: { $regexMatch: { input: '$$raw', regex: 'Jan' } }, then: '01' },
+                        { case: { $regexMatch: { input: '$$raw', regex: 'Feb' } }, then: '02' },
+                        { case: { $regexMatch: { input: '$$raw', regex: 'Mar' } }, then: '03' },
+                        { case: { $regexMatch: { input: '$$raw', regex: 'Apr' } }, then: '04' },
+                        { case: { $regexMatch: { input: '$$raw', regex: 'May' } }, then: '05' },
+                        { case: { $regexMatch: { input: '$$raw', regex: 'Jun' } }, then: '06' },
+                        { case: { $regexMatch: { input: '$$raw', regex: 'Jul' } }, then: '07' },
+                        { case: { $regexMatch: { input: '$$raw', regex: 'Aug' } }, then: '08' },
+                        { case: { $regexMatch: { input: '$$raw', regex: 'Sep' } }, then: '09' },
+                        { case: { $regexMatch: { input: '$$raw', regex: 'Oct' } }, then: '10' },
+                        { case: { $regexMatch: { input: '$$raw', regex: 'Nov' } }, then: '11' },
+                        { case: { $regexMatch: { input: '$$raw', regex: 'Dec' } }, then: '12' },
+                      ],
+                      default: '00'
+                    }}, '-',
+                    { $cond: [
+                      { $lte: [{ $strLenCP: { $substr: ['$$raw', 0, 2] } }, 1] },
+                      { $concat: ['0', { $substr: ['$$raw', 0, 1] }] },
+                      { $substr: ['$$raw', 0, 2] }
+                    ]}
+                  ]
                 }
               }
             }
           }
         }
-      },
-      { $match: { _d: { $gte: effectiveFrom, $lte: effectiveTo } } }
-    ]
+      }
+    }
 
-    // Base geo filter
-    const geoMatch: Record<string, string> = {}
-    if (region)    geoMatch[F.region]    = region
-    if (area)      geoMatch[F.area]      = area
-    if (territory) geoMatch[F.territory] = territory
+    const dateMatchStage = {
+      $match: { _d: { $gte: effectiveFrom, $lte: effectiveTo } }
+    }
 
-    // Get distinct values using aggregation (respects date + cascading)
-    const getDistinct = async (field: string, extraMatch?: Record<string, string>) => {
-      const match = { ...geoMatch, ...extraMatch }
+    // Helper: get distinct values for a field with optional filter
+    const getDistinct = async (field: string, matchExtra: Record<string, string> = {}) => {
       const pipeline = [
-        { $match: match },
-        ...dateStages,
+        { $match: matchExtra },
+        dateConvertStage,
+        dateMatchStage,
         { $group: { _id: `$${field}` } },
-        { $match: { _id: { $ne: null, $ne: '' } } },
-        { $sort: { _id: 1 } },
+        { $match: { _id: { $gt: '' } } },  // filter out null/empty — uses $gt instead of $ne
+        { $sort: { _id: 1 as const } },
         { $project: { _id: 0, value: '$_id' } }
       ]
       const results = await col.aggregate(pipeline).toArray()
-      return results.map((r: {value: string}) => r.value).filter(Boolean)
+      return results.map((r: Record<string, string>) => r.value).filter(Boolean)
     }
 
+    const regionMatch:    Record<string, string> = {}
+    const areaMatch:      Record<string, string> = { ...(region    ? { [F.region]:    region    } : {}) }
+    const territoryMatch: Record<string, string> = { ...(region    ? { [F.region]:    region    } : {}), ...(area      ? { [F.area]:      area      } : {}) }
+    const townMatch:      Record<string, string> = { ...(region    ? { [F.region]:    region    } : {}), ...(area      ? { [F.area]:      area      } : {}), ...(territory ? { [F.territory]: territory } : {}) }
+
     const [regions, areas, territories, towns] = await Promise.all([
-      getDistinct(F.region,    {}),
-      getDistinct(F.area,      region ? { [F.region]: region } : {}),
-      getDistinct(F.territory, {
-        ...(region ? { [F.region]: region } : {}),
-        ...(area   ? { [F.area]:   area   } : {}),
-      }),
-      getDistinct(F.town, {
-        ...(region    ? { [F.region]:    region    } : {}),
-        ...(area      ? { [F.area]:      area      } : {}),
-        ...(territory ? { [F.territory]: territory } : {}),
-      }),
+      getDistinct(F.region,    regionMatch),
+      getDistinct(F.area,      areaMatch),
+      getDistinct(F.territory, territoryMatch),
+      getDistinct(F.town,      townMatch),
     ])
 
     return NextResponse.json({ regions, areas, territories, towns })
