@@ -3,96 +3,126 @@ import { connectDB } from '@/lib/mongodb'
 
 export const dynamic = 'force-dynamic'
 
-async function buildGeoModel() {
-  const db  = await connectDB()
-  const orders   = db.collection('ORDER_DATA')
-  const geoModel = db.collection('GEO_MODEL')
-
-  const sample = await orders.findOne({})
-  if (!sample) return
-
-  const keys = Object.keys(sample)
-  const f = (candidates: string[]) => candidates.find(c => keys.includes(c)) || candidates[0]
-  const F = {
-    region:    f(['Region']),
-    area:      f(['Area']),
-    territory: f(['Territory']),
-    town:      f(['Town']),
-  }
-
-  const combos = await orders.aggregate([
-    { $group: {
-      _id: {
-        region:    `$${F.region}`,
-        area:      `$${F.area}`,
-        territory: `$${F.territory}`,
-        town:      `$${F.town}`,
-      }
-    }},
-    { $project: {
-      _id: 0,
-      region:    '$_id.region',
-      area:      '$_id.area',
-      territory: '$_id.territory',
-      town:      '$_id.town',
-    }}
-  ]).toArray()
-
-  if (combos.length === 0) return
-
-  await geoModel.deleteMany({})
-  await geoModel.insertMany(combos)
-  await geoModel.createIndex({ region: 1 })
-  await geoModel.createIndex({ region: 1, area: 1 })
-  await geoModel.createIndex({ region: 1, area: 1, territory: 1 })
-  await geoModel.createIndex({ region: 1, area: 1, territory: 1, town: 1 })
-
-  // Save last built timestamp
-  await db.collection('GEO_META').replaceOne(
-    { _id: 'last_built' as unknown as never },
-    { _id: 'last_built', ts: new Date() },
-    { upsert: true }
-  )
-}
-
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
     const region    = searchParams.get('region')    || ''
     const area      = searchParams.get('area')      || ''
     const territory = searchParams.get('territory') || ''
+    const dateFrom  = searchParams.get('dateFrom')  || ''
+    const dateTo    = searchParams.get('dateTo')    || ''
 
     const db  = await connectDB()
-    const col = db.collection('GEO_MODEL')
+    const col = db.collection('ORDER_DATA')
 
-    // Auto-build if empty or stale (older than 6 hours)
-    const meta = await db.collection('GEO_META').findOne({ _id: 'last_built' as unknown as never })
-    const count = await col.countDocuments()
-    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000)
-    const isStale = !meta || new Date((meta as {ts: Date}).ts) < sixHoursAgo
-
-    if (count === 0 || isStale) {
-      await buildGeoModel()
+    const sample = await col.findOne({})
+    if (!sample) {
+      return NextResponse.json({ regions:[], areas:[], territories:[], towns:[] })
     }
 
-    const query: Record<string, string> = {}
-    if (region)    query.region    = region
-    if (area)      query.area      = area
-    if (territory) query.territory = territory
+    const keys = Object.keys(sample)
+    const f = (candidates: string[]) => candidates.find(c => keys.includes(c)) || candidates[0]
+    const F = {
+      region:    f(['Region']),
+      area:      f(['Area']),
+      territory: f(['Territory']),
+      town:      f(['Town']),
+      orderDate: f(['OrderDate','Order Date']),
+    }
+
+    // Current month default
+    const now = new Date()
+    const defaultFrom = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-01'
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+    const defaultTo = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(lastDay).padStart(2, '0')
+    const effectiveFrom = dateFrom || defaultFrom
+    const effectiveTo   = dateTo   || defaultTo
+
+    // Date conversion pipeline stage
+    const dateStages = [
+      {
+        $addFields: {
+          _d: {
+            $cond: {
+              if: { $regexMatch: { input: { $ifNull: [`$${F.orderDate}`, ''] }, regex: '^\\d{4}-\\d{2}-\\d{2}$' } },
+              then: { $ifNull: [`$${F.orderDate}`, ''] },
+              else: {
+                $let: {
+                  vars: { raw: { $ifNull: [`$${F.orderDate}`, ''] } },
+                  in: {
+                    $concat: [
+                      { $cond: [{ $lte: [{ $toInt: { $substr: ['$$raw', 7, 2] } }, 50] }, '20', '19'] },
+                      { $substr: ['$$raw', 7, 2] }, '-',
+                      { $switch: {
+                        branches: [
+                          { case: { $regexMatch: { input: '$$raw', regex: 'Jan' } }, then: '01' },
+                          { case: { $regexMatch: { input: '$$raw', regex: 'Feb' } }, then: '02' },
+                          { case: { $regexMatch: { input: '$$raw', regex: 'Mar' } }, then: '03' },
+                          { case: { $regexMatch: { input: '$$raw', regex: 'Apr' } }, then: '04' },
+                          { case: { $regexMatch: { input: '$$raw', regex: 'May' } }, then: '05' },
+                          { case: { $regexMatch: { input: '$$raw', regex: 'Jun' } }, then: '06' },
+                          { case: { $regexMatch: { input: '$$raw', regex: 'Jul' } }, then: '07' },
+                          { case: { $regexMatch: { input: '$$raw', regex: 'Aug' } }, then: '08' },
+                          { case: { $regexMatch: { input: '$$raw', regex: 'Sep' } }, then: '09' },
+                          { case: { $regexMatch: { input: '$$raw', regex: 'Oct' } }, then: '10' },
+                          { case: { $regexMatch: { input: '$$raw', regex: 'Nov' } }, then: '11' },
+                          { case: { $regexMatch: { input: '$$raw', regex: 'Dec' } }, then: '12' },
+                        ],
+                        default: '00'
+                      }}, '-',
+                      { $cond: [
+                        { $lte: [{ $strLenCP: { $substr: ['$$raw', 0, 2] } }, 1] },
+                        { $concat: ['0', { $substr: ['$$raw', 0, 1] }] },
+                        { $substr: ['$$raw', 0, 2] }
+                      ]}
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      { $match: { _d: { $gte: effectiveFrom, $lte: effectiveTo } } }
+    ]
+
+    // Base geo filter
+    const geoMatch: Record<string, string> = {}
+    if (region)    geoMatch[F.region]    = region
+    if (area)      geoMatch[F.area]      = area
+    if (territory) geoMatch[F.territory] = territory
+
+    // Get distinct values using aggregation (respects date + cascading)
+    const getDistinct = async (field: string, extraMatch?: Record<string, string>) => {
+      const match = { ...geoMatch, ...extraMatch }
+      const pipeline = [
+        { $match: match },
+        ...dateStages,
+        { $group: { _id: `$${field}` } },
+        { $match: { _id: { $ne: null, $ne: '' } } },
+        { $sort: { _id: 1 } },
+        { $project: { _id: 0, value: '$_id' } }
+      ]
+      const results = await col.aggregate(pipeline).toArray()
+      return results.map((r: {value: string}) => r.value).filter(Boolean)
+    }
 
     const [regions, areas, territories, towns] = await Promise.all([
-      col.distinct('region',    {}),
-      col.distinct('area',      region ? { region } : {}),
-      col.distinct('territory', region || area ? { ...(region ? {region} : {}), ...(area ? {area} : {}) } : {}),
-      col.distinct('town',      Object.keys(query).length ? query : {}),
+      getDistinct(F.region,    {}),
+      getDistinct(F.area,      region ? { [F.region]: region } : {}),
+      getDistinct(F.territory, {
+        ...(region ? { [F.region]: region } : {}),
+        ...(area   ? { [F.area]:   area   } : {}),
+      }),
+      getDistinct(F.town, {
+        ...(region    ? { [F.region]:    region    } : {}),
+        ...(area      ? { [F.area]:      area      } : {}),
+        ...(territory ? { [F.territory]: territory } : {}),
+      }),
     ])
 
-    return NextResponse.json({
-      regions:     regions.filter(Boolean).sort(),
-      areas:       areas.filter(Boolean).sort(),
-      territories: territories.filter(Boolean).sort(),
-      towns:       towns.filter(Boolean).sort(),
-    })
+    return NextResponse.json({ regions, areas, territories, towns })
+
   } catch (err) {
     console.error('[API /geo]', err)
     return NextResponse.json({ regions:[], areas:[], territories:[], towns:[] })
