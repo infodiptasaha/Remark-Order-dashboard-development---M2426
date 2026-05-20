@@ -3,3 +3,14 @@
   "buildCommand": "npm run build",
   "outputDirectory": ".next"
 }
+{
+  "framework": "nextjs",
+  "buildCommand": "npm run build",
+  "outputDirectory": ".next",
+  "crons": [
+    {
+      "path": "/api/cron?secret=REPLACE_WITH_YOUR_SECRET",
+      "schedule": "0 1 * * *"
+    }
+  ]
+}
