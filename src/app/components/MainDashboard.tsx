@@ -29,7 +29,7 @@ interface Charts {
 }
 interface Order {
   OrderDate: string; Region: string; Area: string; Territory: string; Town: string
-  SOName: string; OutletName: string; BrandName: string; SKUName: string
+  SOName: string; OutletCode: string; OutletName: string; BrandName: string; SKUName: string
   OrderPcs: number; FreePcs: number; GrossTP: number; Discount: number; NetTP: number
 }
 interface GeoFilters {
@@ -96,7 +96,6 @@ export default function MainDashboard() {
   const pageSize = 20
   const abortRef = useRef<AbortController | null>(null)
 
-  // Geo QS — includes date so dropdowns match selected month
   const geoQS = useCallback(() => {
     const p = new URLSearchParams()
     if (region)    p.set('region',    region)
@@ -107,7 +106,6 @@ export default function MainDashboard() {
     return p.toString()
   }, [region, area, territory, dateFrom, dateTo])
 
-  // Full QS
   const buildQS = useCallback((extra?: Record<string, string>) => {
     const p = new URLSearchParams()
     if (region)    p.set('region',    region)
@@ -123,7 +121,6 @@ export default function MainDashboard() {
     return p.toString()
   }, [region, area, territory, town, soName, brand, search, dateFrom, dateTo])
 
-  // Fetch geo — updates when date or geo selection changes
   useEffect(() => {
     fetch('/api/geo?' + geoQS())
       .then(r => r.json())
@@ -136,7 +133,6 @@ export default function MainDashboard() {
       .catch(() => {})
   }, [geoQS])
 
-  // Fetch SO + Brand
   useEffect(() => {
     fetch('/api/orders?mode=filters&' + buildQS())
       .then(r => r.json())
@@ -147,7 +143,6 @@ export default function MainDashboard() {
       .catch(() => {})
   }, [buildQS])
 
-  // Main data fetch
   useEffect(() => {
     if (abortRef.current) abortRef.current.abort()
     const ctrl = new AbortController()
@@ -183,6 +178,10 @@ export default function MainDashboard() {
         }
       })
   }, [buildQS, page])
+
+  const handleExport = () => {
+    window.open('/api/export?' + buildQS(), '_blank')
+  }
 
   const handleRegion    = (v: string) => { setRegion(v);    setArea(''); setTerritory(''); setTown(''); setSoName(''); setBrand(''); setPage(0) }
   const handleArea      = (v: string) => { setArea(v);      setTerritory(''); setTown(''); setSoName(''); setBrand(''); setPage(0) }
@@ -318,7 +317,7 @@ export default function MainDashboard() {
               <table className="w-full text-xs">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    {['Date','Region','Area','Territory','Town','SO Name','Outlet','Brand','SKU','Pcs','Free','Gross TP','Disc','Net TP'].map(h => (
+                    {['Date','Region','Area','Territory','Town','SO Name','Outlet Code','Outlet Name','Brand','SKU','Pcs','Free','Gross TP','Disc','Net TP'].map(h => (
                       <th key={h} className="px-3 py-2.5 text-left text-gray-500 font-medium whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -332,6 +331,7 @@ export default function MainDashboard() {
                       <td className="px-3 py-2 whitespace-nowrap text-gray-500">{row.Territory}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{row.Town}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{row.SOName}</td>
+                      <td className="px-3 py-2 whitespace-nowrap font-mono text-gray-500">{row.OutletCode}</td>
                       <td className="px-3 py-2 max-w-[120px] truncate" title={row.OutletName}>{row.OutletName}</td>
                       <td className="px-3 py-2">
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-50 text-blue-600 whitespace-nowrap">{row.BrandName}</span>
@@ -350,7 +350,15 @@ export default function MainDashboard() {
           )}
 
           <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-400">
-            <span>{(total || 0).toLocaleString()} rows{total > 0 ? ' · page ' + (page+1) + ' of ' + totalPages : ''}</span>
+            <div className="flex items-center gap-3">
+              <span>{(total || 0).toLocaleString()} rows{total > 0 ? ' · page ' + (page+1) + ' of ' + totalPages : ''}</span>
+              <button
+                onClick={handleExport}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium cursor-pointer transition-colors"
+              >
+                ⬇ Export CSV
+              </button>
+            </div>
             <div className="flex gap-1">
               <button className={btnCls} disabled={page === 0}           onClick={() => setPage(0)}>««</button>
               <button className={btnCls} disabled={page === 0}           onClick={() => setPage(p => p-1)}>‹</button>
