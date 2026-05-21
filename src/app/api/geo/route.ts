@@ -30,7 +30,6 @@ export async function GET(req: NextRequest) {
       orderDate: f(['OrderDate', 'Order Date']),
     }
 
-    // Current month default
     const now = new Date()
     const defaultFrom = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-01'
     const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
@@ -38,7 +37,6 @@ export async function GET(req: NextRequest) {
     const effectiveFrom = dateFrom || defaultFrom
     const effectiveTo   = dateTo   || defaultTo
 
-    // Date conversion stage
     const dateConvertStage = {
       $addFields: {
         _d: {
@@ -83,18 +81,17 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const dateMatchStage = {
-      $match: { _d: { $gte: effectiveFrom, $lte: effectiveTo } }
-    }
-
-    // Helper: get distinct values for a field with optional filter
-    const getDistinct = async (field: string, matchExtra: Record<string, string> = {}) => {
+    // With date filter
+    const getDistinctWithDate = async (
+      field: string,
+      matchExtra: Record<string, string> = {}
+    ): Promise<string[]> => {
       const pipeline = [
         { $match: matchExtra },
         dateConvertStage,
-        dateMatchStage,
+        { $match: { _d: { $gte: effectiveFrom, $lte: effectiveTo } } },
         { $group: { _id: `$${field}` } },
-        { $match: { _id: { $gt: '' } } },  // filter out null/empty — uses $gt instead of $ne
+        { $match: { _id: { $gt: '' } } },
         { $sort: { _id: 1 as const } },
         { $project: { _id: 0, value: '$_id' } }
       ]
@@ -102,16 +99,28 @@ export async function GET(req: NextRequest) {
       return results.map((r: Record<string, string>) => r.value).filter(Boolean)
     }
 
-    const regionMatch:    Record<string, string> = {}
-    const areaMatch:      Record<string, string> = { ...(region    ? { [F.region]:    region    } : {}) }
-    const territoryMatch: Record<string, string> = { ...(region    ? { [F.region]:    region    } : {}), ...(area      ? { [F.area]:      area      } : {}) }
-    const townMatch:      Record<string, string> = { ...(region    ? { [F.region]:    region    } : {}), ...(area      ? { [F.area]:      area      } : {}), ...(territory ? { [F.territory]: territory } : {}) }
+    // Region — NO date filter, always all regions from entire collection
+    const allRegions = await col.distinct(F.region, {})
+    const regions = allRegions.filter((v: unknown) => v && String(v).trim() !== '').sort() as string[]
 
-    const [regions, areas, territories, towns] = await Promise.all([
-      getDistinct(F.region,    regionMatch),
-      getDistinct(F.area,      areaMatch),
-      getDistinct(F.territory, territoryMatch),
-      getDistinct(F.town,      townMatch),
+    // Area, Territory, Town — date filter applies
+    const areaMatch: Record<string, string> = {
+      ...(region ? { [F.region]: region } : {})
+    }
+    const territoryMatch: Record<string, string> = {
+      ...(region ? { [F.region]: region } : {}),
+      ...(area   ? { [F.area]:   area   } : {})
+    }
+    const townMatch: Record<string, string> = {
+      ...(region    ? { [F.region]:    region    } : {}),
+      ...(area      ? { [F.area]:      area      } : {}),
+      ...(territory ? { [F.territory]: territory } : {})
+    }
+
+    const [areas, territories, towns] = await Promise.all([
+      getDistinctWithDate(F.area,      areaMatch),
+      getDistinctWithDate(F.territory, territoryMatch),
+      getDistinctWithDate(F.town,      townMatch),
     ])
 
     return NextResponse.json({ regions, areas, territories, towns })
