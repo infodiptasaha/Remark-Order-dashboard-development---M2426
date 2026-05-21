@@ -2,64 +2,65 @@
 
 import { useState } from 'react'
 import MainDashboard from './components/MainDashboard'
-import ComingSoon from './components/ComingSoon'
+import CustomerBehavior from './components/CustomerBehavior'
+import ProductSales from './components/ProductSales'
+import TimeTrends from './components/TimeTrends'
+import Geographic from './components/Geographic'
+import BrandAnalysis from './components/BrandAnalysis'
 
 const NAV = [
-  { id: 1, label: 'Order Dashboard', icon: '📦', items: null },
-  {
-    id: 2, label: 'Customer Behavior', icon: '👥',
-    items: [
-      'Recency / Frequency / Monetary',
-      'Loyal vs At-Risk (Churn)',
-      'Customer Lifetime Value (CLV)',
-      'Repeat Purchase Rate',
-    ]
-  },
-  {
-    id: 3, label: 'Product & Sales', icon: '🛒',
-    items: [
-      'Top & Bottom Products',
-      'Market Basket Analysis',
-    ]
-  },
-  {
-    id: 4, label: 'Time & Trends', icon: '📈',
-    items: [
-      'Seasonality & Trends',
-      'Daily / Hourly Sales Peak',
-    ]
-  },
-  {
-    id: 5, label: 'Geographic', icon: '🗺️',
-    items: [
-      'Hotspots & Coldspots',
-      'Product-Location Fit',
-      'Heatmap',
-    ]
-  },
-  {
-    id: 6, label: 'Brand Analysis', icon: '🏷️',
-    items: [
-      'Brand Performance Metrics',
-      'Order Volume',
-      'Growth Rate (vs Prev Month)',
-      'Repeat Purchase by Brand',
-      'Brand Affinity',
-      'Average Order Value',
-      'Repeat Purchase Velocity',
-      'Cohort Analysis',
-      'Customer Churn Rate',
-      'Switching Analysis',
-    ]
-  },
+  { id: 1, label: 'Order Dashboard',    icon: '📦', items: null },
+  { id: 2, label: 'Customer Behavior',  icon: '👥', items: [
+    'Recency / Frequency / Monetary',
+    'Loyal vs At-Risk (Churn)',
+    'Customer Lifetime Value (CLV)',
+    'Repeat Purchase Rate',
+  ]},
+  { id: 3, label: 'Product & Sales',    icon: '🛒', items: [
+    'Top & Bottom Products',
+    'Market Basket Analysis',
+  ]},
+  { id: 4, label: 'Time & Trends',      icon: '📈', items: [
+    'Seasonality & Trends',
+    'Daily / Hourly Sales Peak',
+  ]},
+  { id: 5, label: 'Geographic',         icon: '🗺️', items: [
+    'Hotspots & Coldspots',
+    'Product-Location Fit',
+    'Heatmap',
+  ]},
+  { id: 6, label: 'Brand Analysis',     icon: '🏷️', items: [
+    'Brand Performance Metrics',
+    'Order Volume',
+    'Growth Rate (vs Prev Month)',
+    'Repeat Purchase by Brand',
+    'Brand Affinity',
+    'Average Order Value',
+    'Repeat Purchase Velocity',
+    'Cohort Analysis',
+    'Customer Churn Rate',
+    'Switching Analysis',
+  ]},
 ]
 
 export default function Page() {
-  const [activeNav, setActiveNav] = useState(1)
-  const [activeSub, setActiveSub] = useState<string | null>(null)
+  const [activeNav,   setActiveNav]   = useState(1)
+  const [activeSub,   setActiveSub]   = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
 
   const activeParent = NAV.find(n => n.id === activeNav)
+
+  function renderContent() {
+    switch (activeNav) {
+      case 1: return <MainDashboard />
+      case 2: return <CustomerBehavior subItem={activeSub} />
+      case 3: return <ProductSales     subItem={activeSub} />
+      case 4: return <TimeTrends       subItem={activeSub} />
+      case 5: return <Geographic       subItem={activeSub} />
+      case 6: return <BrandAnalysis    subItem={activeSub} />
+      default: return <MainDashboard />
+    }
+  }
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">
@@ -119,16 +120,9 @@ export default function Page() {
         )}
       </aside>
 
-      {/* Main content */}
+      {/* Main */}
       <div className="flex-1 overflow-auto">
-        {activeNav === 1
-          ? <MainDashboard />
-          : <ComingSoon
-              section={activeParent?.label || ''}
-              subItem={activeSub}
-              icon={activeParent?.icon || ''}
-            />
-        }
+        {renderContent()}
       </div>
     </div>
   )
